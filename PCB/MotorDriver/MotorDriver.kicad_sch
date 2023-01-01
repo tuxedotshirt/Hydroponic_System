@@ -116,9 +116,6 @@
     (path "/85145a08-b706-448c-a2cc-21d8c78348c3/5f41be2a-7ef9-47ed-b77f-255eae7e03bc"
       (reference "#PWR04") (unit 1) (value "GND") (footprint "")
     )
-    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/3361668d-42c3-41cb-b709-a98d6178870b"
-      (reference "#PWR05") (unit 1) (value "GND") (footprint "")
-    )
     (path "/5ae1b378-9e67-4924-bc9e-139220a6c022/af887171-574b-413e-9d7e-2f59c8d11a38"
       (reference "#PWR06") (unit 1) (value "GND") (footprint "")
     )
@@ -164,6 +161,27 @@
     (path "/5c1c1ddd-253c-4b20-a2dd-b4e1a1fe2a94/c4e1b70c-797e-46bf-ab1b-8c92bbe1f8e3"
       (reference "#PWR020") (unit 1) (value "GND") (footprint "")
     )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/2e2512f2-222c-4bfe-9d8d-454bfcbfa050"
+      (reference "#PWR?") (unit 1) (value "GND1") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/da0a317f-69ce-45ad-90f7-5ef7be3ef39b"
+      (reference "#PWR?") (unit 1) (value "GND1") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/dab81d8a-137c-4cb5-9aa8-3d2febf79a66"
+      (reference "#PWR?") (unit 1) (value "GND1") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/e5f736e0-2a07-4b70-a0f2-e8f8f76ea345"
+      (reference "#PWR?") (unit 1) (value "GND") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/fae821aa-0ec9-492f-9dd7-5807ed34fe0b"
+      (reference "#PWR?") (unit 1) (value "GND1") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/fb95505b-0233-4f09-b149-dd4062a9caef"
+      (reference "#PWR?") (unit 1) (value "GND1") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/fe34669d-8b46-43c2-8e7c-45530ab4fbeb"
+      (reference "#PWR?") (unit 1) (value "GND") (footprint "")
+    )
     (path "/85145a08-b706-448c-a2cc-21d8c78348c3/2adb02cf-0568-4318-82ba-ff4919eb41e0"
       (reference "C1") (unit 1) (value "10uF") (footprint "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm")
     )
@@ -175,6 +193,12 @@
     )
     (path "/5ae1b378-9e67-4924-bc9e-139220a6c022/9b991500-5442-463e-9bf5-35536b6626b8"
       (reference "C4") (unit 1) (value "C") (footprint "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/106dbb1f-82ca-4c06-b754-b82ea612c3bc"
+      (reference "C?") (unit 1) (value "1uF") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/b38c7170-4f9e-42bd-a623-8ad991f1f4d8"
+      (reference "C?") (unit 1) (value "1uF") (footprint "")
     )
     (path "/5ae1b378-9e67-4924-bc9e-139220a6c022/8eef7c3f-294d-4d50-bd7e-22ec1ca9a0cb"
       (reference "D1") (unit 1) (value "1N4007") (footprint "Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal")
@@ -215,6 +239,9 @@
     (path "/5ae1b378-9e67-4924-bc9e-139220a6c022/18ddcb10-f635-4c0a-8b43-c1bde8a5ec31"
       (reference "PS1") (unit 1) (value "R-78B3.3-2.0") (footprint "SnapEDA Library:CONV_R-78B3.3-2.0")
     )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/8700c354-ce16-4597-90ea-ca144dbf8874"
+      (reference "PS?") (unit 1) (value "RFM-0505S") (footprint "SnapEDA Library:CONV_RFM-0505S")
+    )
     (path "/5c1c1ddd-253c-4b20-a2dd-b4e1a1fe2a94/5e66f64a-6a38-44ce-a57c-15d6b0fe4c2f"
       (reference "Q1") (unit 1) (value "IRLB8721PBF") (footprint "SnapEDA Library:TO254P1067X483X2057-3")
     )
@@ -223,12 +250,6 @@
     )
     (path "/5c1c1ddd-253c-4b20-a2dd-b4e1a1fe2a94/102cea9c-14ce-48b9-81c4-5d1e366500d5"
       (reference "Q3") (unit 1) (value "IRLB8721PBF") (footprint "SnapEDA Library:TO254P1067X483X2057-3")
-    )
-    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/54015403-1f61-458f-b956-69420b5176f9"
-      (reference "R1") (unit 1) (value "4.7k") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal")
-    )
-    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/77e73d5c-56c0-4301-9498-d7a12c035025"
-      (reference "R2") (unit 1) (value "4.7k") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal")
     )
     (path "/ce67af25-0417-4b5d-8b04-714a25f518b7/95ffab20-116e-43fb-997b-67c123c1343b"
       (reference "R3") (unit 1) (value "4.7k") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal")
@@ -241,6 +262,18 @@
     )
     (path "/5c1c1ddd-253c-4b20-a2dd-b4e1a1fe2a94/4b0cf1b2-c0a2-410d-a737-a3aeaed66be2"
       (reference "R6") (unit 1) (value "1k") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/9b488897-1767-491f-a613-b4381d6b1d2c"
+      (reference "R?") (unit 1) (value "10k") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/acbd404a-53c3-41cc-ba22-d1adc1e7aeb1"
+      (reference "R?") (unit 1) (value "10k") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/c80492e3-9f29-4995-a8e7-e4b2cf9f9daa"
+      (reference "R?") (unit 1) (value "10k") (footprint "")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/e6b4e095-ce72-487a-801a-54123b0e0baf"
+      (reference "R?") (unit 1) (value "10k") (footprint "")
     )
     (path "/85145a08-b706-448c-a2cc-21d8c78348c3/0e7acab9-e940-4a1c-9838-be065fbbcef7"
       (reference "U1") (unit 1) (value "ULN2003A") (footprint "Package_DIP:DIP-16_W7.62mm_Socket")
@@ -256,6 +289,9 @@
     )
     (path "/c96f07d5-8c47-4188-aa88-c98f1fba5175/c3977596-1e47-4ab4-a703-7ba6f29396ae"
       (reference "U5") (unit 1) (value "ESP32-WROOM-32U") (footprint "Hydro:ESP32-WROOM-32U")
+    )
+    (path "/51f463a1-afb1-42b5-922f-4acd7b0d61a6/9b5f4cb3-7baa-4ba0-8e85-04d409591aa1"
+      (reference "U?") (unit 1) (value "Si8600AD-B-IS") (footprint "SOIC-16W_SIL")
     )
   )
 )
