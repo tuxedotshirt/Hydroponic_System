@@ -54,6 +54,18 @@
     ph and ec adjustment error - denotes chemicals are low
     x1 pin main pump relay or mosfett
     x1 pin air stone relay or mosfett
+    1x pin addressable led
+*/
+
+/*
+   Available pins:
+   15
+   23
+   25
+   32?
+   33?
+   35 input only
+   X 2 - onboard LED
 */
 #include <Wire.h>
 #include <EEPROM.h>
@@ -117,6 +129,10 @@ SemaphoreHandle_t commSemaphore;
 SemaphoreHandle_t eepromSemaphore;
 
 //communication
+simpleTimer bleFlash(1000);
+
+#define ledPin 15
+bool flash = false;
 simpleTimer updateDB(10000);
 WiFiClient client;
 BluetoothSerial SerialBT;
@@ -144,7 +160,7 @@ char * key;
 //BLE switch pin
 const int SW = 19;
 bool bleFlag = false;
-simpleTimer changeVar(30000);
+simpleTimer changeVar(60000);
 
 Cipher * cipher = new Cipher();
 void dataLoggingTask(void *pvParameters);
@@ -158,12 +174,17 @@ void setup() {
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
   pinMode(34, INPUT);
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, flash);
   sensors.begin();
 
   phTimer.initialize();
   ecTimer.initialize();
   changeVar.initialize();
   wifiTimer.initialize();
+  bleFlash.initialize();
+  
+  
   setCipherKey();
   //wifiCredentialsTESTING();
 
@@ -182,7 +203,11 @@ void setup() {
 
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
+    if (WiFi.status() == WL_CONNECTED) {
+      
 
+
+    }
     //If ble button has been pressed, restart to enter ble mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -350,6 +375,7 @@ void bleSettings(int buttonPressed) {
   bool settingsChanged = false;
 
   if (buttonPressed == 0) {
+    bleFlash.reset();
     Serial.println("beginning SerialBT");
     if (!SerialBT.begin("ESP32"))
     {
@@ -367,6 +393,11 @@ void bleSettings(int buttonPressed) {
   }
   while (bleFlag == true) {
     delay(50);
+    //digitalWrite(ledPin, HIGH);
+    if (bleFlash.triggered()) {
+      digitalWrite(ledPin, flash);
+      flash = !flash;
+    }
     if (changeVar.triggered()) {
       Serial.println(F("changeVar triggered"));
       bleFlag = false;
@@ -398,7 +429,7 @@ void bleSettings(int buttonPressed) {
 
         //Save unencrypted password
         //preferences.putString(pwdPref, String(passArr));
-        
+
         bleFlag = false;
         settingsChanged  = true;
       }
@@ -420,6 +451,9 @@ void bleSettings(int buttonPressed) {
         bleFlag = false;
         settingsChanged  = true;
       }
+      //add deploymentID to preferences
+
+      //add BLE display name to preferences
       preferences.end();
       //break;
 
