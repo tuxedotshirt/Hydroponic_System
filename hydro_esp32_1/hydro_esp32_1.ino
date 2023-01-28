@@ -127,13 +127,14 @@ TaskHandle_t monitorCore;
 TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
 SemaphoreHandle_t eepromSemaphore;
-
+SemaphoreHandle_t flashSemaphore;
 //communication
-simpleTimer bleFlash(1000);
+simpleTimer bleFlash(2000);
+simpleTimer commFlash(5000);
 
 #define ledPin 15
 bool flash = false;
-simpleTimer updateDB(10000);
+simpleTimer updateDB(25000);
 WiFiClient client;
 BluetoothSerial SerialBT;
 Preferences preferences;
@@ -147,20 +148,24 @@ String adapterString;
 int adapterLength;
 String bleMessage;
 
-#define ssidPref "ssid"
 #define pwdPref "pwd"
 #define ecPref "ecSetting"
 #define pHPref "pHSetting"
+#define bleNamePref "bleNameSetting"
+#define ssidPref "ssidPref"
 
 char *ssidArr;
 char *passArr;
+char* bleNameArr;
+String bleNameString = "Hydroponic";
+String bleNameTemp = "";
 char macArr[17];
 char * key;
 
 //BLE switch pin
 const int SW = 19;
 bool bleFlag = false;
-simpleTimer changeVar(60000);
+simpleTimer changeVar(90000);
 
 Cipher * cipher = new Cipher();
 void dataLoggingTask(void *pvParameters);
@@ -183,8 +188,9 @@ void setup() {
   changeVar.initialize();
   wifiTimer.initialize();
   bleFlash.initialize();
+  commFlash.initialize();
   
-  
+  getSettings();
   setCipherKey();
   //wifiCredentialsTESTING();
 
@@ -196,6 +202,8 @@ void setup() {
 
   //Assign tasks to cores
   commSemaphore = xSemaphoreCreateMutex();
+  flashSemaphore = xSemaphoreCreateMutex();
+  
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 
@@ -203,10 +211,14 @@ void setup() {
 
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
-    if (WiFi.status() == WL_CONNECTED) {
-      
-
-
+    if(WiFi.status() == WL_CONNECTED){
+      if(commFlash.triggered() && xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ){
+        digitalWrite(ledPin, HIGH);
+        Serial.println("flash LED");
+        delay(50);
+        digitalWrite(ledPin, LOW);
+        xSemaphoreGive(flashSemaphore);
+      }
     }
     //If ble button has been pressed, restart to enter ble mode
     if (digitalRead(SW) == 0) {
@@ -221,6 +233,7 @@ void dataLoggingTask(void *pvParameters) {
         connectWiFi();
       }
       else {
+        digitalWrite(ledPin,HIGH);
         struct tm timeinfo;
         String dateTimeString;
         if (getLocalTime(&timeinfo)) {
@@ -272,7 +285,7 @@ void dataLoggingTask(void *pvParameters) {
             //}
             //---------------------------------------------------------------------
             http.end();
-
+            digitalWrite(ledPin, LOW);
             Serial.println("Returned mutex in dataLoggingTask");
           }
         }
@@ -287,8 +300,8 @@ void dataLoggingTask(void *pvParameters) {
 void wifiCredentialsTESTING() {
   preferences.begin("WiFiLogin", false);
   preferences.clear();
-  String ssidStr = "PrettyFlyForAWIFI-2.4";
-  String passStr = "j5zu522xw7";
+  String ssidStr = "";
+  String passStr = "";
   preferences.putString("ssid", ssidStr);
   preferences.putString("pwd", passStr);
   preferences.end();
@@ -334,7 +347,8 @@ bool getSettings() {
   bool ssidSet = false;
   free(ssidArr); //Free allocated memory
   free(passArr); //Free allocated memory
-
+  //free (bleLabel);
+  
   preferences.begin("WiFiLogin", false);
 
   if (preferences.isKey(ssidPref)) {
@@ -356,6 +370,16 @@ bool getSettings() {
   if (preferences.isKey(ecPref)) {
     ecSetting = preferences.getFloat(ecPref);
   }
+  if (preferences.isKey(bleNamePref)){
+    //adapterString = preferences.getString(bleNamePref);
+    //adapterLength = adapterString.length() + 1;
+    //bleNameArr = (char*) malloc (adapterLength);
+    //adapterString.toCharArray(bleNameArr, adapterLength);
+    bleNameString = preferences.getString(bleNamePref);
+    Serial.print("Got bleNameString here: ");
+    Serial.println(bleNameString);
+    
+  }
   preferences.end();
 
   return ssidSet;
@@ -375,9 +399,10 @@ void bleSettings(int buttonPressed) {
   bool settingsChanged = false;
 
   if (buttonPressed == 0) {
+    
     bleFlash.reset();
     Serial.println("beginning SerialBT");
-    if (!SerialBT.begin("ESP32"))
+    if (!SerialBT.begin(bleNameString))
     {
       Serial.println(F("An error occurred initializing Bluetooth"));
     }
@@ -392,6 +417,7 @@ void bleSettings(int buttonPressed) {
     delay(10);
   }
   while (bleFlag == true) {
+    //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
     delay(50);
     //digitalWrite(ledPin, HIGH);
     if (bleFlash.triggered()) {
@@ -401,6 +427,7 @@ void bleSettings(int buttonPressed) {
     if (changeVar.triggered()) {
       Serial.println(F("changeVar triggered"));
       bleFlag = false;
+      xSemaphoreGive(flashSemaphore);
     }
     while (SerialBT.available()) {
       preferences.begin("WiFiLogin", false);
@@ -433,6 +460,14 @@ void bleSettings(int buttonPressed) {
         bleFlag = false;
         settingsChanged  = true;
       }
+      bleNameTemp = String(strtok(NULL, ","));
+      if(bleNameTemp != "?"){
+        preferences.putString(bleNamePref, bleNameTemp);
+        Serial.print("bleName: ");
+        Serial.println(preferences.getString(bleNamePref));
+        bleFlag = false;
+        settingsChanged = true;
+      }
       phTemp = atof(strtok(NULL, ","));
       if (phTemp > 0.00) {
         preferences.putFloat(pHPref, phTemp);
@@ -440,7 +475,7 @@ void bleSettings(int buttonPressed) {
         //Serial.println(preferences.getFloat("pHSetting"));
         phSetting = preferences.getFloat(pHPref);
         bleFlag = false;
-        settingsChanged  = true;
+        settingsChanged = true;
       }
       ecTemp = atoi(strtok(NULL, ","));
       if (ecTemp > 0.00) {
