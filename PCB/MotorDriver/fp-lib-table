@@ -1,4 +1,0 @@
-(fp_lib_table
-  (lib (name "footprints")(type "KiCad")(uri "C:/Users/Don/Documents/KiCad/6.0/footprints.pretty")(options "")(descr ""))
-  (lib (name "Hydro")(type "KiCad")(uri "C:/Users/Don/Documents/KiCad/6.0/footprints/Hydro.pretty/Hydro.pretty")(options "")(descr ""))
-)

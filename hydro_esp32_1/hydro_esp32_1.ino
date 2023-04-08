@@ -37,35 +37,36 @@
   D2 ------------ 32
 */
 
-/*Preferences:
-   ssid - string
-   pwd - string
-   phSetting - float
-   ecSetting - float
-*/
 
+/*
+ * Pins required:
+ * 3x4 for peristaltic pumps
+ * 1 for ec probe
+ * 2 - RX/TX for pH
+ * 1 for light relay
+ * 1 for button
+ * 1 for main pump relay
+ * 
+ * 1 for status led
+ */
 /*TODO:
-    Check wifi connection periodically, attempt reconnect
-    Set wifi hostname
-    Set ble name on app
-    x1 pin Add factory reset button or send reset request over ble
+    remove temperature probe. Can be assumed to be ~20 degrees.
+    send reset request over ble for factory settings
     Save deploymentID for DB from app
-    x1 pin Main tank water level sensor
+    USE EC PROBE FOR WATER LEVEL DETECTION. IF 0, WATER LEVEL IS LOW.
+    
     ph and ec adjustment error - denotes chemicals are low
-    x1 pin main pump relay or mosfett
-    x1 pin air stone relay or mosfett
-    1x pin addressable led
+    1 pin nutrient tank level sensor
+    1 pin for light relay
 */
 
 /*
    Available pins:
    15
-   23
-   25
-   32?
-   33?
+   34 
+   33 might brick wifi?
    35 input only
-   X 2 - onboard LED
+
 */
 #include <Wire.h>
 #include <EEPROM.h>
@@ -88,25 +89,21 @@
 
 //Temperature sensor
 #define TdsSensorPin 34
-#define oneWireBus 4
-float temperature = 25, tdsValue = 0, kValue = 1.0;
-OneWire oneWire(oneWireBus);
-DallasTemperature sensors(&oneWire);
+//#define oneWireBus 4
+float temperature = 22, tdsValue = 0, kValue = 1.0;
+//OneWire oneWire(oneWireBus);
+//DallasTemperature sensors(&oneWire);
 
 //EC Probe
-//#define ecLowThreshold 1000
-//#define ecHighThreshold 2000
 float ecSetting = 2000;
 float ecTemp = 0;
-#define ecInterval 10000
+#define ecInterval 20000
 #define ecAdjustInterval 5000
-unsigned long ecStateInterval = 10000;
+//unsigned long ecStateInterval = 10000;
 simpleTimer ecTimer(ecInterval);
 float ec = 0;
 
 //pH Probe
-#define phLowThreshold 4//5.9
-#define phHighThreshold 5//6.9
 float phSetting = 7;
 float phTemp = 0;
 #define phInterval 30000 //5 minutes is 300000 //Default timer
@@ -119,6 +116,7 @@ float ph = 0;
 //Stepper motors
 simpleStepper phUp(13, 26, 14, 27);
 simpleStepper phDown(16, 17, 5, 18);
+simpleStepper nutrientPump(4, 15, 0, 32);
 #define DELAY 2
 #define stepsPerRev 512
 
@@ -128,11 +126,12 @@ TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
 SemaphoreHandle_t eepromSemaphore;
 SemaphoreHandle_t flashSemaphore;
-//communication
+
 simpleTimer bleFlash(2000);
 simpleTimer commFlash(5000);
 
-#define ledPin 15
+//#define ledPin 15
+#define ledPin 12
 bool flash = false;
 simpleTimer updateDB(25000);
 WiFiClient client;
@@ -153,6 +152,8 @@ String bleMessage;
 #define pHPref "pHSetting"
 #define bleNamePref "bleNameSetting"
 #define ssidPref "ssidPref"
+#define pumpPin 23
+#define nutrientPin 32
 
 char *ssidArr;
 char *passArr;
@@ -174,22 +175,39 @@ void monitorTask(void * pvParameters);
 //Http client for db
 HTTPClient http;
 
+simpleTimer mainPumpOn(10000);
+simpleTimer mainPumpOff(2000);
+simpleTimer nutPumpOff(5000);
+
+bool pumpOn = false;
+bool nutOn = false;
+
+//#define waterLevel 15
+
 void setup() {
   Wire.begin();
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
-  pinMode(34, INPUT);
+  //pinMode(34, INPUT);
   pinMode(ledPin, OUTPUT);
   digitalWrite(ledPin, flash);
-  sensors.begin();
-
+ // sensors.begin();
+  pinMode(pumpPin, OUTPUT);
+  //pinMode(nutrientPin, OUTPUT);
+  //pinMode(waterLevel, INPUT);
+  phUp.off();
+  phDown.off();
+  
   phTimer.initialize();
   ecTimer.initialize();
   changeVar.initialize();
   wifiTimer.initialize();
   bleFlash.initialize();
   commFlash.initialize();
-  
+  mainPumpOn.initialize();
+  mainPumpOff.initialize();
+  nutPumpOff.initialize();
+
   getSettings();
   setCipherKey();
   //wifiCredentialsTESTING();
@@ -203,7 +221,7 @@ void setup() {
   //Assign tasks to cores
   commSemaphore = xSemaphoreCreateMutex();
   flashSemaphore = xSemaphoreCreateMutex();
-  
+
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 
@@ -211,8 +229,8 @@ void setup() {
 
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
-    if(WiFi.status() == WL_CONNECTED){
-      if(commFlash.triggered() && xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ){
+    if (WiFi.status() == WL_CONNECTED) {
+      if (commFlash.triggered() && xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
         digitalWrite(ledPin, HIGH);
         Serial.println("flash LED");
         delay(50);
@@ -224,16 +242,14 @@ void dataLoggingTask(void *pvParameters) {
     if (digitalRead(SW) == 0) {
       ESP.restart();
     }
-    //bleSettings(digitalRead(SW));
 
-    //delay(50);
     if (updateDB.triggered()) {
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("dataLoggingTask no wifi");
         connectWiFi();
       }
       else {
-        digitalWrite(ledPin,HIGH);
+        digitalWrite(ledPin, HIGH);
         struct tm timeinfo;
         String dateTimeString;
         if (getLocalTime(&timeinfo)) {
@@ -266,24 +282,14 @@ void dataLoggingTask(void *pvParameters) {
             Serial.println("Grabbing mutex in dataLoggingTask");
             String urlFinal = URL + "device=" + device + "&dtg=" + dateTimeString + "&ph=" + ph + "&ec=" + ec + "&temp=" + temperature;
             xSemaphoreGive(commSemaphore);
-            //Serial.print("POST data to spreadsheet:");
-            //Serial.println(urlFinal);
 
             http.begin(urlFinal.c_str());
-            //delay(50);
             http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
             int httpCode = http.GET();
             Serial.print("HTTP Status Code: ");
             Serial.println(httpCode);
-            //---------------------------------------------------------------------
-            //getting response from google sheet
-            //String payload;
-            //if (httpCode > 0) {
-            //payload = http.getString();
-            //Serial.println("Payload: " + payload);
-            //}
-            //---------------------------------------------------------------------
+
             http.end();
             digitalWrite(ledPin, LOW);
             Serial.println("Returned mutex in dataLoggingTask");
@@ -315,17 +321,11 @@ void connectWiFi() {
     wifiTimer.reset();
 
     WiFi.begin(ssidArr, passArr);
-    Serial.print("connectWiFi ssidArr: ");
-    Serial.print(ssidArr);
-    Serial.println(".");
-    Serial.print("connectWiFi passArr: ");
-    Serial.print(passArr);
-    Serial.println(".");
-    //Serial.println("here 1");
+
     while (WiFi.status() != WL_CONNECTED)
     {
       delay(500);
-      Serial.print(F("!"));
+      Serial.print(F("."));
       //Try for 20 seconds
       if (wifiTimer.triggered()) {
         break;
@@ -339,16 +339,11 @@ void connectWiFi() {
   }
 }
 
-bool putSetting(String arg) {
-
-}
-
 bool getSettings() {
   bool ssidSet = false;
   free(ssidArr); //Free allocated memory
   free(passArr); //Free allocated memory
-  //free (bleLabel);
-  
+
   preferences.begin("WiFiLogin", false);
 
   if (preferences.isKey(ssidPref)) {
@@ -370,15 +365,10 @@ bool getSettings() {
   if (preferences.isKey(ecPref)) {
     ecSetting = preferences.getFloat(ecPref);
   }
-  if (preferences.isKey(bleNamePref)){
-    //adapterString = preferences.getString(bleNamePref);
-    //adapterLength = adapterString.length() + 1;
-    //bleNameArr = (char*) malloc (adapterLength);
-    //adapterString.toCharArray(bleNameArr, adapterLength);
+  if (preferences.isKey(bleNamePref)) {
     bleNameString = preferences.getString(bleNamePref);
     Serial.print("Got bleNameString here: ");
     Serial.println(bleNameString);
-    
   }
   preferences.end();
 
@@ -399,7 +389,7 @@ void bleSettings(int buttonPressed) {
   bool settingsChanged = false;
 
   if (buttonPressed == 0) {
-    
+
     bleFlash.reset();
     Serial.println("beginning SerialBT");
     if (!SerialBT.begin(bleNameString))
@@ -461,7 +451,7 @@ void bleSettings(int buttonPressed) {
         settingsChanged  = true;
       }
       bleNameTemp = String(strtok(NULL, ","));
-      if(bleNameTemp != "?"){
+      if (bleNameTemp != "?") {
         preferences.putString(bleNamePref, bleNameTemp);
         Serial.print("bleName: ");
         Serial.println(preferences.getString(bleNamePref));
@@ -502,96 +492,128 @@ void bleSettings(int buttonPressed) {
 
 void monitorTask(void * pvParameters) {
   for (;;) {
-    delay(100);
-    if (phTimer.triggered()) {
-      //Serial.println("Checking pH.");
-      check_pH();
-      //Serial.println("Done checking pH.");
-    }
-    if (ecTimer.triggered()) {
-      //Serial.println("Checking ec.");
-      check_ec();
-      //Serial.println("Done checking ec.");
-    }
+    delay(10);
+    mainPumpControl();
+
+    check_pH();
+
+    check_ec();
+
   }
 }
 
 //Puts the temperature compensated ecValue into the global variable
-void check_ec() {
-  sensors.requestTemperatures();
-  float temperatureReading = sensors.getTempCByIndex(0);
-  //Serial.print("temp: ");
-  //Serial.println(temperature);
-  float analogValue = analogRead(TdsSensorPin);
-  float voltage = analogValue / 4096 * 3.3;
-  float ecValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * kValue;
-  float ecValue25  =  ecValue / (1.0 + 0.02 * (temperatureReading - 25.0)); //temperature compensation
-  float tdsValue = ecValue25 * TdsFactor;
-  //access shared resources to update transmitted value, but continues autonomously if value can't be accessed
-  if (commSemaphore != NULL) {
-    if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
-      Serial.println(F("Grabbing mutex in check_ec"));
-      ec = ecValue25;
-      temperature = temperatureReading;
-      xSemaphoreGive(commSemaphore);
-      Serial.println(F("Returned mutex in check_ec"));
+bool check_ec() {
+  if (ecTimer.triggered()) {
+    //sensors.requestTemperatures();
+    //float temperatureReading = sensors.getTempCByIndex(0);
+    float temperatureReading = temperature;
+    //Serial.print("temp: ");
+    //Serial.println(temperature);
+    float analogValue = analogRead(TdsSensorPin);
+    float voltage = analogValue / 4096 * 3.3;
+    float ecValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * kValue;
+    float ecValue25  =  ecValue / (1.0 + 0.02 * (temperatureReading - 25.0)); //temperature compensation
+    float tdsValue = ecValue25 * TdsFactor;
+    //access shared resources to update transmitted value, but continues autonomously if value can't be accessed
+    if (commSemaphore != NULL) {
+      if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
+        Serial.println(F("Grabbing mutex in check_ec"));
+        ec = ecValue25;
+        //temperature = temperatureReading;
+        xSemaphoreGive(commSemaphore);
+        Serial.println(F("Returned mutex in check_ec"));
+      }
     }
+    ecPumpControl(ecValue25);
+    return true;
   }
-  if (ecValue25 >= (ecSetting - 500)) {
-    Serial.println(F("turning on nutrient pump"));
-    /*
-       turn on nutrient pump here
-    */
-  }
-
-  //Serial.print("ecValue: ");
-  //Serial.println(ecValue);
-  //Serial.print("ecValue25: ");
-  //Serial.println(ecValue25);
-  //Serial.print("tdsValue: ");
-  //Serial.println(tdsValue);
 }
 
-void check_pH() {
-  //int i = 0;
-  pH.send_read_cmd();
-  delay(1000);
-  receive_and_print_reading(pH);             //get the reading from the PH circuit
-  //Serial.println("  ");
-  float phReading = pH.get_last_received_reading();
+bool check_pH() {
+  if (phTimer.triggered()) {
+    pH.send_read_cmd();
+    delay(1000);
+    receive_and_print_reading(pH);             //get the reading from the PH circuit
+    float tempReading = pH.get_last_received_reading();
 
-  //access shared resource, but continues autonomously if db value can't be updated
-  if (commSemaphore != NULL) {
-    if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
-      Serial.println(F("Grabbing mutex in check_pH"));
-      ph = phReading;
-      xSemaphoreGive(commSemaphore);
-      Serial.println(F("Returned mutex in check_pH"));
-    }
-  }
 
-  if (pH.get_error() == Ezo_board::SUCCESS) {
-    if (phReading <= (phSetting - 0.25)) {                            //test condition against pH reading
-      //Serial.println("PH LEVEL TOO LOW");
-      phTimer.setInterval(phAdjustInterval);
-      phUp.forward(stepsPerRev, DELAY);
-      phUp.off();
-    }
-    else if (phReading >= (phSetting +  0.25)) {                          //test condition against pH reading
-      //Serial.println("PH LEVEL TOO HIGH");
-      phTimer.setInterval(phAdjustInterval);
-      phDown.forward(stepsPerRev, DELAY);
-      phDown.off();
+    //if we got a valid reading
+    if (pH.get_error() == Ezo_board::SUCCESS) {
+      //access shared resource, but continues autonomously if db value can't be updated
+      if (commSemaphore != NULL) {
+        if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
+          Serial.println(F("Grabbing mutex in check_pH"));
+          ph = tempReading;
+          xSemaphoreGive(commSemaphore);
+          Serial.println(F("Returned mutex in check_pH"));
+        }
+      }
+      //The pump should only try to adjust the pH once, with the most current reading and only if there are no errors in the reading.
+      phPumpControl(tempReading);
+      return true;
     }
     else {
-      phTimer.setInterval(phInterval);
+      Serial.println(F("pH ERROR"));
+      return false;
     }
   }
+}
+
+//blocking function, do not want to take readings from sensors with pumps running
+void ecPumpControl(float reading) {
+  if (reading <= (ecSetting - 500)) {
+    Serial.println(F("Adjusting nutrients"));
+    //nutPumpOff.reset();
+    nutrientPump.forward(stepsPerRev, DELAY);
+    nutrientPump.off();
+    //digitalWrite(nutrientPin, LOW);
+    //Serial.println("turning nutrient pump on");
+   // while (!nutPumpOff.triggered()) {}
+    //Serial.println("turning nutrient pump off");
+    //digitalWrite(nutrientPin, HIGH);
+  }
+}
+
+//blocking function, do not want to take readings from sensors with pumps running
+void phPumpControl(float reading) {
+  if (reading <= (phSetting - 0.25)) {                            //test condition against pH reading
+    //Serial.println("PH LEVEL TOO LOW");
+    phTimer.setInterval(phAdjustInterval);
+    phUp.forward(stepsPerRev, DELAY);
+    phUp.off();
+  }
+  else if (reading >= (phSetting +  0.25)) {                          //test condition against pH reading
+    //Serial.println("PH LEVEL TOO HIGH");
+    phTimer.setInterval(phAdjustInterval);
+    phDown.forward(stepsPerRev, DELAY);
+    phDown.off();
+  }
   else {
-    Serial.println(F("pH ERROR"));
+    phTimer.setInterval(phInterval);
+  }
+}
+
+void mainPumpControl() {
+  if (!pumpOn) {
+    //check if it's time to turn on
+    if (mainPumpOn.triggered()) {
+      Serial.println("mainPumpOn triggered");
+      mainPumpOff.reset();
+      digitalWrite(pumpPin, HIGH);
+      pumpOn = true;
+    }
+  }
+  //if the pump is on:
+  if (pumpOn) {
+    if (mainPumpOff.triggered()) {
+      Serial.println("mainPumpOff triggered");
+      mainPumpOn.reset();
+      digitalWrite(pumpPin, LOW);
+      pumpOn = false;
+    }
   }
 }
 
 //empty loop required by ESP32. Loops are handled in tasks.
-void loop() {
-}
+void loop() {}
