@@ -39,22 +39,22 @@
 
 
 /*
- * Pins required:
- * 3x4 for peristaltic pumps
- * 1 for ec probe
- * 2 - RX/TX for pH
- * 1 for light relay
- * 1 for button
- * 1 for main pump relay
- * 
- * 1 for status led
- */
+   Pins required:
+   3x4 for peristaltic pumps
+   1 for ec probe
+   2 - RX/TX for pH
+   1 for light relay
+   1 for button
+   1 for main pump relay
+
+   1 for status led
+*/
 /*TODO:
     remove temperature probe. Can be assumed to be ~20 degrees.
     send reset request over ble for factory settings
     Save deploymentID for DB from app
     USE EC PROBE FOR WATER LEVEL DETECTION. IF 0, WATER LEVEL IS LOW.
-    
+
     ph and ec adjustment error - denotes chemicals are low
     1 pin nutrient tank level sensor
     1 pin for light relay
@@ -63,7 +63,7 @@
 /*
    Available pins:
    15
-   34 
+   34
    33 might brick wifi?
    35 input only
 
@@ -76,7 +76,6 @@
 #include "src/TDS/GravityTDS.h"
 #include "ESP.h"
 #include <OneWire.h>
-#include <simpleStepper.h>
 #include <simpleTimer.h>
 #include "secret.h"
 #include "WiFi.h"
@@ -84,7 +83,17 @@
 #include "time.h"
 #include "BluetoothSerial.h"
 #include <Preferences.h>
-#include <Cipher.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+//OLED
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 32 // OLED display height, in pixels
+
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
 
 
 //Temperature sensor
@@ -113,12 +122,15 @@ simpleTimer phTimer(phInterval);
 Ezo_board pH = Ezo_board(99, "pH");  //i2c address of pH EZO board is 99
 float ph = 0;
 
-//Stepper motors
-simpleStepper phUp(13, 26, 14, 27);
-simpleStepper phDown(16, 17, 5, 18);
-simpleStepper nutrientPump(4, 15, 0, 32);
-#define DELAY 2
-#define stepsPerRev 512
+//MOSFETS
+#define circulation 13
+#define pHUp 16
+#define pHDown 17
+#define nutrients 18
+#define lights 23
+#define spare 27
+
+#define button 19
 
 //RTOS
 TaskHandle_t monitorCore;
@@ -127,12 +139,6 @@ SemaphoreHandle_t commSemaphore;
 SemaphoreHandle_t eepromSemaphore;
 SemaphoreHandle_t flashSemaphore;
 
-simpleTimer bleFlash(2000);
-simpleTimer commFlash(5000);
-
-//#define ledPin 15
-#define ledPin 12
-bool flash = false;
 simpleTimer updateDB(25000);
 WiFiClient client;
 BluetoothSerial SerialBT;
@@ -152,8 +158,6 @@ String bleMessage;
 #define pHPref "pHSetting"
 #define bleNamePref "bleNameSetting"
 #define ssidPref "ssidPref"
-#define pumpPin 23
-#define nutrientPin 32
 
 char *ssidArr;
 char *passArr;
@@ -163,12 +167,12 @@ String bleNameTemp = "";
 char macArr[17];
 char * key;
 
-//BLE switch pin
-const int SW = 19;
+#define SW 19
+
 bool bleFlag = false;
 simpleTimer changeVar(90000);
 
-Cipher * cipher = new Cipher();
+//Cipher * cipher = new Cipher();
 void dataLoggingTask(void *pvParameters);
 void monitorTask(void * pvParameters);
 
@@ -177,40 +181,44 @@ HTTPClient http;
 
 simpleTimer mainPumpOn(10000);
 simpleTimer mainPumpOff(2000);
-simpleTimer nutPumpOff(5000);
+
 
 bool pumpOn = false;
 bool nutOn = false;
-
-//#define waterLevel 15
 
 void setup() {
   Wire.begin();
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
-  //pinMode(34, INPUT);
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, flash);
- // sensors.begin();
-  pinMode(pumpPin, OUTPUT);
-  //pinMode(nutrientPin, OUTPUT);
-  //pinMode(waterLevel, INPUT);
-  phUp.off();
-  phDown.off();
-  
+  //pinMode(pumpPin, OUTPUT);
+  wifiCredentialsTESTING();
+  //MOSFETS
+  pinMode(pHUp, OUTPUT);
+  pinMode(pHDown, OUTPUT);
+  pinMode(circulation, OUTPUT);
+  pinMode(nutrients, OUTPUT);
+  pinMode(lights, OUTPUT);
+  pinMode(spare, OUTPUT);
+  digitalWrite(pHUp, LOW);
+  digitalWrite(pHDown, LOW);
+  digitalWrite(circulation, LOW);
+  digitalWrite(nutrients, LOW);
+  digitalWrite(lights, LOW);
+  digitalWrite(spare, LOW);
+  delay(5000);
   phTimer.initialize();
   ecTimer.initialize();
   changeVar.initialize();
   wifiTimer.initialize();
-  bleFlash.initialize();
-  commFlash.initialize();
+
   mainPumpOn.initialize();
   mainPumpOff.initialize();
-  nutPumpOff.initialize();
-
-  getSettings();
-  setCipherKey();
   //wifiCredentialsTESTING();
+  getSettings();
+  //setCipherKey();
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+  }
 
   //Start ble during startup
   bleSettings(digitalRead(SW));
@@ -225,16 +233,27 @@ void setup() {
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 
+
+  writeMessage(F("I love you!"));
+
+}
+
+void writeMessage(const __FlashStringHelper * message) {
+  display.clearDisplay();
+
+  display.setTextSize(1);             // Normal 1:1 pixel scale
+  display.setTextColor(SSD1306_WHITE);        // Draw white text
+  display.setCursor(0, 0);            // Start at top-left corner
+  display.println(message);
+  display.display();
+  delay(500);
 }
 
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
+    getSettings();
     if (WiFi.status() == WL_CONNECTED) {
-      if (commFlash.triggered() && xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
-        digitalWrite(ledPin, HIGH);
-        Serial.println("flash LED");
-        delay(50);
-        digitalWrite(ledPin, LOW);
+      if (xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
         xSemaphoreGive(flashSemaphore);
       }
     }
@@ -246,10 +265,10 @@ void dataLoggingTask(void *pvParameters) {
     if (updateDB.triggered()) {
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("dataLoggingTask no wifi");
+        writeMessage(F("WIFI NOT CONNECTED"));
         connectWiFi();
       }
       else {
-        digitalWrite(ledPin, HIGH);
         struct tm timeinfo;
         String dateTimeString;
         if (getLocalTime(&timeinfo)) {
@@ -291,7 +310,7 @@ void dataLoggingTask(void *pvParameters) {
             Serial.println(httpCode);
 
             http.end();
-            digitalWrite(ledPin, LOW);
+            writeMessage(F("Updated database"));
             Serial.println("Returned mutex in dataLoggingTask");
           }
         }
@@ -306,10 +325,10 @@ void dataLoggingTask(void *pvParameters) {
 void wifiCredentialsTESTING() {
   preferences.begin("WiFiLogin", false);
   preferences.clear();
-  String ssidStr = "";
-  String passStr = "";
-  preferences.putString("ssid", ssidStr);
-  preferences.putString("pwd", passStr);
+  String ssidStr = "PrettyFlyForAWIFI-2.4";
+  String passStr = "j5zu522xw7";
+  preferences.putString(ssidPref, ssidStr);
+  preferences.putString(pwdPref, passStr);
   preferences.end();
   if (getSettings()) {
     Serial.println("got settings");
@@ -318,14 +337,16 @@ void wifiCredentialsTESTING() {
 
 void connectWiFi() {
   if (getSettings()) {
+
     wifiTimer.reset();
 
     WiFi.begin(ssidArr, passArr);
-
+    writeMessage(F("Connecting WIFI"));
     while (WiFi.status() != WL_CONNECTED)
     {
+      
       delay(500);
-      Serial.print(F("."));
+      //Serial.print(F("."));
       //Try for 20 seconds
       if (wifiTimer.triggered()) {
         break;
@@ -351,13 +372,17 @@ bool getSettings() {
     adapterLength = adapterString.length() + 1;
     ssidArr = (char*) malloc (adapterLength);
     adapterString.toCharArray(ssidArr, adapterLength);
+    Serial.print("SSIDArr: ");
+    Serial.println(ssidArr);
     ssidSet = true;
   }
   if (preferences.isKey(pwdPref)) {
-    adapterString = cipher->decryptString(preferences.getString(pwdPref));
+    adapterString = preferences.getString(pwdPref);//cipher->decryptString(preferences.getString(pwdPref));
     adapterLength = adapterString.length() + 1;
     passArr = (char*) malloc (adapterLength);
     adapterString.toCharArray(passArr, adapterLength);
+    Serial.print("PassArr: ");
+    Serial.println(passArr);
   }
   if (preferences.isKey(pHPref)) {
     phSetting = preferences.getFloat(pHPref);
@@ -375,7 +400,8 @@ bool getSettings() {
   return ssidSet;
 }
 
-void setCipherKey() {
+/*
+  void setCipherKey() {
   Serial.print("ESP Board MAC Address:  ");
   Serial.println(WiFi.macAddress());
   String mac = WiFi.macAddress();
@@ -383,14 +409,13 @@ void setCipherKey() {
   key = macArr;
 
   cipher->setKey(key);
-}
-
+  }
+*/
 void bleSettings(int buttonPressed) {
   bool settingsChanged = false;
-
+  writeMessage(F("Bluetooth"));
   if (buttonPressed == 0) {
 
-    bleFlash.reset();
     Serial.println("beginning SerialBT");
     if (!SerialBT.begin(bleNameString))
     {
@@ -409,11 +434,7 @@ void bleSettings(int buttonPressed) {
   while (bleFlag == true) {
     //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
     delay(50);
-    //digitalWrite(ledPin, HIGH);
-    if (bleFlash.triggered()) {
-      digitalWrite(ledPin, flash);
-      flash = !flash;
-    }
+
     if (changeVar.triggered()) {
       Serial.println(F("changeVar triggered"));
       bleFlag = false;
@@ -440,12 +461,11 @@ void bleSettings(int buttonPressed) {
       passArr = strtok(NULL, ",");
       if (String(passArr) != "?") {
         //Save encrypted password
-        String data = String(passArr);
-        String cipherString = cipher->encryptString(data);
-        preferences.putString(pwdPref, cipherString);
-
+        //String data = String(passArr);
+        //String cipherString = cipher->encryptString(data);
+        //preferences.putString(pwdPref, cipherString);
+        preferences.putString(pwdPref, String(passArr));
         //Save unencrypted password
-        //preferences.putString(pwdPref, String(passArr));
 
         bleFlag = false;
         settingsChanged  = true;
@@ -505,6 +525,7 @@ void monitorTask(void * pvParameters) {
 //Puts the temperature compensated ecValue into the global variable
 bool check_ec() {
   if (ecTimer.triggered()) {
+    writeMessage(F("Checking EC"));
     //sensors.requestTemperatures();
     //float temperatureReading = sensors.getTempCByIndex(0);
     float temperatureReading = temperature;
@@ -533,6 +554,7 @@ bool check_ec() {
 bool check_pH() {
   if (phTimer.triggered()) {
     pH.send_read_cmd();
+    writeMessage(F("Checking pH"));
     delay(1000);
     receive_and_print_reading(pH);             //get the reading from the PH circuit
     float tempReading = pH.get_last_received_reading();
@@ -564,14 +586,10 @@ bool check_pH() {
 void ecPumpControl(float reading) {
   if (reading <= (ecSetting - 500)) {
     Serial.println(F("Adjusting nutrients"));
-    //nutPumpOff.reset();
-    nutrientPump.forward(stepsPerRev, DELAY);
-    nutrientPump.off();
-    //digitalWrite(nutrientPin, LOW);
-    //Serial.println("turning nutrient pump on");
-   // while (!nutPumpOff.triggered()) {}
-    //Serial.println("turning nutrient pump off");
-    //digitalWrite(nutrientPin, HIGH);
+    writeMessage(F("Adjusting nutrients"));
+    digitalWrite(nutrients, HIGH);
+    delay(5000);
+    digitalWrite(nutrients, LOW);
   }
 }
 
@@ -579,15 +597,19 @@ void ecPumpControl(float reading) {
 void phPumpControl(float reading) {
   if (reading <= (phSetting - 0.25)) {                            //test condition against pH reading
     //Serial.println("PH LEVEL TOO LOW");
+    writeMessage(F("Adjusting pH up"));
     phTimer.setInterval(phAdjustInterval);
-    phUp.forward(stepsPerRev, DELAY);
-    phUp.off();
+    digitalWrite(pHUp, HIGH);
+    delay(2500);
+    digitalWrite(pHUp, LOW);
   }
   else if (reading >= (phSetting +  0.25)) {                          //test condition against pH reading
     //Serial.println("PH LEVEL TOO HIGH");
+    writeMessage(F("Adjusting pH down"));
     phTimer.setInterval(phAdjustInterval);
-    phDown.forward(stepsPerRev, DELAY);
-    phDown.off();
+    digitalWrite(pHDown, HIGH);
+    delay(2500);
+    digitalWrite(pHDown, LOW);
   }
   else {
     phTimer.setInterval(phInterval);
@@ -599,8 +621,9 @@ void mainPumpControl() {
     //check if it's time to turn on
     if (mainPumpOn.triggered()) {
       Serial.println("mainPumpOn triggered");
+      writeMessage(F("Circulation pump on"));
       mainPumpOff.reset();
-      digitalWrite(pumpPin, HIGH);
+      digitalWrite(circulation, HIGH);
       pumpOn = true;
     }
   }
@@ -609,7 +632,7 @@ void mainPumpControl() {
     if (mainPumpOff.triggered()) {
       Serial.println("mainPumpOff triggered");
       mainPumpOn.reset();
-      digitalWrite(pumpPin, LOW);
+      digitalWrite(circulation, LOW);
       pumpOn = false;
     }
   }
