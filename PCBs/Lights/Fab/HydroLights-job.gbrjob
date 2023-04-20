@@ -5,7 +5,7 @@
       "Application": "Pcbnew",
       "Version": "(6.0.8)"
     },
-    "CreationDate": "2023-04-08T13:35:57-06:00"
+    "CreationDate": "2023-04-18T20:52:45-06:00"
   },
   "GeneralSpecs": {
     "ProjectId": {
@@ -41,16 +41,6 @@
     {
       "Path": "HydroLights-B_Cu.gbr",
       "FileFunction": "Copper,L2,Bot",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "HydroLights-F_Paste.gbr",
-      "FileFunction": "SolderPaste,Top",
-      "FilePolarity": "Positive"
-    },
-    {
-      "Path": "HydroLights-B_Paste.gbr",
-      "FileFunction": "SolderPaste,Bot",
       "FilePolarity": "Positive"
     },
     {

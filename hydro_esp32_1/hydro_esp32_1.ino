@@ -123,7 +123,8 @@ Ezo_board pH = Ezo_board(99, "pH");  //i2c address of pH EZO board is 99
 float ph = 0;
 
 //MOSFETS
-#define circulation 13
+//#define circulation 13
+#define circulation 15
 #define pHUp 16
 #define pHDown 17
 #define nutrients 18
@@ -191,7 +192,7 @@ void setup() {
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
   //pinMode(pumpPin, OUTPUT);
-  wifiCredentialsTESTING();
+  //wifiCredentialsTESTING();
   //MOSFETS
   pinMode(pHUp, OUTPUT);
   pinMode(pHDown, OUTPUT);
@@ -265,7 +266,7 @@ void dataLoggingTask(void *pvParameters) {
     if (updateDB.triggered()) {
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("dataLoggingTask no wifi");
-        writeMessage(F("WIFI NOT CONNECTED"));
+        writeMessage(F("WIFI NOT\nCONNECTED"));
         connectWiFi();
       }
       else {
@@ -372,8 +373,8 @@ bool getSettings() {
     adapterLength = adapterString.length() + 1;
     ssidArr = (char*) malloc (adapterLength);
     adapterString.toCharArray(ssidArr, adapterLength);
-    Serial.print("SSIDArr: ");
-    Serial.println(ssidArr);
+    //Serial.print("SSIDArr: ");
+    //Serial.println(ssidArr);
     ssidSet = true;
   }
   if (preferences.isKey(pwdPref)) {
@@ -381,8 +382,8 @@ bool getSettings() {
     adapterLength = adapterString.length() + 1;
     passArr = (char*) malloc (adapterLength);
     adapterString.toCharArray(passArr, adapterLength);
-    Serial.print("PassArr: ");
-    Serial.println(passArr);
+    //Serial.print("PassArr: ");
+    //Serial.println(passArr);
   }
   if (preferences.isKey(pHPref)) {
     phSetting = preferences.getFloat(pHPref);
@@ -546,6 +547,7 @@ bool check_ec() {
         Serial.println(F("Returned mutex in check_ec"));
       }
     }
+    
     ecPumpControl(ecValue25);
     return true;
   }
@@ -554,6 +556,7 @@ bool check_ec() {
 bool check_pH() {
   if (phTimer.triggered()) {
     pH.send_read_cmd();
+    display.clearDisplay();
     writeMessage(F("Checking pH"));
     delay(1000);
     receive_and_print_reading(pH);             //get the reading from the PH circuit
@@ -586,10 +589,11 @@ bool check_pH() {
 void ecPumpControl(float reading) {
   if (reading <= (ecSetting - 500)) {
     Serial.println(F("Adjusting nutrients"));
-    writeMessage(F("Adjusting nutrients"));
+    writeMessage(F("Adjusting \nnutrients"));
     digitalWrite(nutrients, HIGH);
     delay(5000);
     digitalWrite(nutrients, LOW);
+    display.clearDisplay();
   }
 }
 
@@ -597,19 +601,21 @@ void ecPumpControl(float reading) {
 void phPumpControl(float reading) {
   if (reading <= (phSetting - 0.25)) {                            //test condition against pH reading
     //Serial.println("PH LEVEL TOO LOW");
-    writeMessage(F("Adjusting pH up"));
+    writeMessage(F("Adjusting pH\nup"));
     phTimer.setInterval(phAdjustInterval);
     digitalWrite(pHUp, HIGH);
     delay(2500);
     digitalWrite(pHUp, LOW);
+    display.clearDisplay();
   }
   else if (reading >= (phSetting +  0.25)) {                          //test condition against pH reading
     //Serial.println("PH LEVEL TOO HIGH");
-    writeMessage(F("Adjusting pH down"));
+    writeMessage(F("Adjusting pH\ndown"));
     phTimer.setInterval(phAdjustInterval);
     digitalWrite(pHDown, HIGH);
     delay(2500);
     digitalWrite(pHDown, LOW);
+    display.clearDisplay();
   }
   else {
     phTimer.setInterval(phInterval);
@@ -621,10 +627,11 @@ void mainPumpControl() {
     //check if it's time to turn on
     if (mainPumpOn.triggered()) {
       Serial.println("mainPumpOn triggered");
-      writeMessage(F("Circulation pump on"));
+      writeMessage(F("Circulation\npump on"));
       mainPumpOff.reset();
       digitalWrite(circulation, HIGH);
       pumpOn = true;
+      display.clearDisplay();
     }
   }
   //if the pump is on:
@@ -634,6 +641,7 @@ void mainPumpControl() {
       mainPumpOn.reset();
       digitalWrite(circulation, LOW);
       pumpOn = false;
+      display.clearDisplay();
     }
   }
 }

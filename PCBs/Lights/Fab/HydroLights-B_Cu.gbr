@@ -1,12 +1,12 @@
-%TF.GenerationSoftware,KiCad,Pcbnew,(6.0.8)*%
-%TF.CreationDate,2023-04-08T13:35:57-06:00*%
-%TF.ProjectId,HydroLights,48796472-6f4c-4696-9768-74732e6b6963,rev?*%
-%TF.SameCoordinates,Original*%
-%TF.FileFunction,Copper,L2,Bot*%
-%TF.FilePolarity,Positive*%
+G04 #@! TF.GenerationSoftware,KiCad,Pcbnew,(6.0.8)*
+G04 #@! TF.CreationDate,2023-04-18T20:52:45-06:00*
+G04 #@! TF.ProjectId,HydroLights,48796472-6f4c-4696-9768-74732e6b6963,rev?*
+G04 #@! TF.SameCoordinates,Original*
+G04 #@! TF.FileFunction,Copper,L2,Bot*
+G04 #@! TF.FilePolarity,Positive*
 %FSLAX46Y46*%
 G04 Gerber Fmt 4.6, Leading zero omitted, Abs format (unit mm)*
-G04 Created by KiCad (PCBNEW (6.0.8)) date 2023-04-08 13:35:57*
+G04 Created by KiCad (PCBNEW (6.0.8)) date 2023-04-18 20:52:45*
 %MOMM*%
 %LPD*%
 G01*
