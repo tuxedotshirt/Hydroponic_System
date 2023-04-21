@@ -62,7 +62,7 @@
 
 /*
    Available pins:
-   15
+   
    34
    33 might brick wifi?
    35 input only
@@ -173,26 +173,17 @@ char * key;
 bool bleFlag = false;
 simpleTimer changeVar(90000);
 
-//Cipher * cipher = new Cipher();
 void dataLoggingTask(void *pvParameters);
 void monitorTask(void * pvParameters);
 
 //Http client for db
 HTTPClient http;
 
-simpleTimer mainPumpOn(10000);
-simpleTimer mainPumpOff(2000);
-
-
-bool pumpOn = false;
-bool nutOn = false;
-
 void setup() {
   Wire.begin();
   Serial.begin(9600);
   pinMode(SW, INPUT_PULLUP);
-  //pinMode(pumpPin, OUTPUT);
-  //wifiCredentialsTESTING();
+
   //MOSFETS
   pinMode(pHUp, OUTPUT);
   pinMode(pHDown, OUTPUT);
@@ -211,19 +202,15 @@ void setup() {
   ecTimer.initialize();
   changeVar.initialize();
   wifiTimer.initialize();
-
-  mainPumpOn.initialize();
-  mainPumpOff.initialize();
-  //wifiCredentialsTESTING();
-  getSettings();
-  //setCipherKey();
+  
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));
   }
 
   //Start ble during startup
   bleSettings(digitalRead(SW));
-
+  getSettings();
+  
   //If wifi has been set before, just reconnect and carry on.
   connectWiFi();
 
@@ -234,12 +221,10 @@ void setup() {
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 
-
-  writeMessage(F("I love you!"));
-
 }
 
-void writeMessage(const __FlashStringHelper * message) {
+//void writeMessage(const __FlashStringHelper * message) {
+void writeMessage(String message) {
   display.clearDisplay();
 
   display.setTextSize(1);             // Normal 1:1 pixel scale
@@ -253,11 +238,14 @@ void writeMessage(const __FlashStringHelper * message) {
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
-    if (WiFi.status() == WL_CONNECTED) {
-      if (xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
-        xSemaphoreGive(flashSemaphore);
-      }
-    }
+
+    //if wifi is connected take and immediately give flashSemaphore? WHYYYYYYYY?
+    //if (WiFi.status() == WL_CONNECTED) {
+    //  if (xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
+    //    xSemaphoreGive(flashSemaphore);
+    //  }
+    //}
+    
     //If ble button has been pressed, restart to enter ble mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -323,19 +311,6 @@ void dataLoggingTask(void *pvParameters) {
   }
 }
 
-void wifiCredentialsTESTING() {
-  preferences.begin("WiFiLogin", false);
-  preferences.clear();
-  String ssidStr = "PrettyFlyForAWIFI-2.4";
-  String passStr = "j5zu522xw7";
-  preferences.putString(ssidPref, ssidStr);
-  preferences.putString(pwdPref, passStr);
-  preferences.end();
-  if (getSettings()) {
-    Serial.println("got settings");
-  }
-}
-
 void connectWiFi() {
   if (getSettings()) {
 
@@ -355,6 +330,7 @@ void connectWiFi() {
     }
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("WiFi connected!");
+      writeMessage(F("WIFI Connected!"));
       // Init and get the time
       configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     }
@@ -378,7 +354,7 @@ bool getSettings() {
     ssidSet = true;
   }
   if (preferences.isKey(pwdPref)) {
-    adapterString = preferences.getString(pwdPref);//cipher->decryptString(preferences.getString(pwdPref));
+    adapterString = preferences.getString(pwdPref);
     adapterLength = adapterString.length() + 1;
     passArr = (char*) malloc (adapterLength);
     adapterString.toCharArray(passArr, adapterLength);
@@ -401,17 +377,6 @@ bool getSettings() {
   return ssidSet;
 }
 
-/*
-  void setCipherKey() {
-  Serial.print("ESP Board MAC Address:  ");
-  Serial.println(WiFi.macAddress());
-  String mac = WiFi.macAddress();
-  mac.toCharArray(macArr, 17);
-  key = macArr;
-
-  cipher->setKey(key);
-  }
-*/
 void bleSettings(int buttonPressed) {
   bool settingsChanged = false;
   writeMessage(F("Bluetooth"));
@@ -436,11 +401,13 @@ void bleSettings(int buttonPressed) {
     //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
     delay(50);
 
+    //timer to exit bluetooth mode
     if (changeVar.triggered()) {
       Serial.println(F("changeVar triggered"));
       bleFlag = false;
       xSemaphoreGive(flashSemaphore);
     }
+    
     while (SerialBT.available()) {
       preferences.begin("WiFiLogin", false);
       String bleMessage = SerialBT.readString();
@@ -461,13 +428,7 @@ void bleSettings(int buttonPressed) {
       }
       passArr = strtok(NULL, ",");
       if (String(passArr) != "?") {
-        //Save encrypted password
-        //String data = String(passArr);
-        //String cipherString = cipher->encryptString(data);
-        //preferences.putString(pwdPref, cipherString);
         preferences.putString(pwdPref, String(passArr));
-        //Save unencrypted password
-
         bleFlag = false;
         settingsChanged  = true;
       }
@@ -593,7 +554,6 @@ void ecPumpControl(float reading) {
     digitalWrite(nutrients, HIGH);
     delay(5000);
     digitalWrite(nutrients, LOW);
-    display.clearDisplay();
   }
 }
 
@@ -622,6 +582,18 @@ void phPumpControl(float reading) {
   }
 }
 
+//Removed timer. Converted to blocking call to prevent sensor readings when pump is on.
+void mainPumpControl() {
+      Serial.println("Circulation pump on");
+      writeMessage(F("Circulation\npump on"));
+      digitalWrite(circulation, HIGH);
+      delay(10000);
+      Serial.println("Circulation pump off");
+      digitalWrite(circulation, LOW);
+      display.clearDisplay(); 
+}
+
+/*
 void mainPumpControl() {
   if (!pumpOn) {
     //check if it's time to turn on
@@ -645,6 +617,7 @@ void mainPumpControl() {
     }
   }
 }
+*/
 
 //empty loop required by ESP32. Loops are handled in tasks.
 void loop() {}
