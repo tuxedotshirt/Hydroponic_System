@@ -197,7 +197,7 @@ void setup() {
   digitalWrite(nutrients, LOW);
   digitalWrite(lights, LOW);
   digitalWrite(spare, LOW);
-  delay(5000);
+  delay(50);
   phTimer.initialize();
   ecTimer.initialize();
   changeVar.initialize();
@@ -208,9 +208,12 @@ void setup() {
   }
 
   //Start ble during startup
+  //In the event that the device has been named already, get whatever settings are available before calling bleSettings
+  getSettings();
   bleSettings(digitalRead(SW));
   getSettings();
-  
+  writeMessage(bleNameString);
+  delay(1000);
   //If wifi has been set before, just reconnect and carry on.
   connectWiFi();
 
@@ -220,7 +223,6 @@ void setup() {
 
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
-
 }
 
 //void writeMessage(const __FlashStringHelper * message) {
@@ -239,13 +241,6 @@ void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
 
-    //if wifi is connected take and immediately give flashSemaphore? WHYYYYYYYY?
-    //if (WiFi.status() == WL_CONNECTED) {
-    //  if (xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
-    //    xSemaphoreGive(flashSemaphore);
-    //  }
-    //}
-    
     //If ble button has been pressed, restart to enter ble mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -368,21 +363,24 @@ bool getSettings() {
     ecSetting = preferences.getFloat(ecPref);
   }
   if (preferences.isKey(bleNamePref)) {
+    bleNameString = "";
     bleNameString = preferences.getString(bleNamePref);
-    Serial.print("Got bleNameString here: ");
-    Serial.println(bleNameString);
+    //Serial.print("Got bleNameString here: ");
+    //Serial.println(bleNameString);
   }
   preferences.end();
 
   return ssidSet;
 }
 
+//void bleSettings(int buttonPressed) {
 void bleSettings(int buttonPressed) {
   bool settingsChanged = false;
   writeMessage(F("Bluetooth"));
   if (buttonPressed == 0) {
 
     Serial.println("beginning SerialBT");
+    Serial.println(F(bleNameString));
     if (!SerialBT.begin(bleNameString))
     {
       Serial.println(F("An error occurred initializing Bluetooth"));
@@ -587,7 +585,7 @@ void mainPumpControl() {
       Serial.println("Circulation pump on");
       writeMessage(F("Circulation\npump on"));
       digitalWrite(circulation, HIGH);
-      delay(10000);
+      delay(100000);
       Serial.println("Circulation pump off");
       digitalWrite(circulation, LOW);
       display.clearDisplay(); 
