@@ -1,4 +1,3 @@
-
 /*
    Temp Probe -> ESP32
    Signal (Yellow) --------- 4 (4.7k resistor between signal and 3.3v)
@@ -62,12 +61,13 @@
 
 /*
    Available pins:
-   
+
    34
    33 might brick wifi?
    35 input only
 
 */
+
 #include <Wire.h>
 #include <EEPROM.h>
 #include "src/Ezo_i2c/Ezo_i2c.h"
@@ -85,6 +85,7 @@
 #include <Preferences.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <ESP32Time.h>
 
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -106,24 +107,21 @@ float temperature = 22, tdsValue = 0, kValue = 1.0;
 //EC Probe
 float ecSetting = 2000;
 float ecTemp = 0;
-#define ecInterval 20000
+#define ecInterval 5000
 #define ecAdjustInterval 5000
-//unsigned long ecStateInterval = 10000;
 simpleTimer ecTimer(ecInterval);
 float ec = 0;
 
 //pH Probe
 float phSetting = 7;
 float phTemp = 0;
-#define phInterval 30000 //5 minutes is 300000 //Default timer
-unsigned long phStateInterval = 10000;
-#define phAdjustInterval 15000 //Tighter timer to use during adjustment checks
+#define phInterval 5000 //10 minutes is 600000 //Default timer
+#define phAdjustInterval 5000 //1 minute timer to use during adjustment checks
 simpleTimer phTimer(phInterval);
 Ezo_board pH = Ezo_board(99, "pH");  //i2c address of pH EZO board is 99
 float ph = 0;
 
 //MOSFETS
-//#define circulation 13
 #define circulation 15
 #define pHUp 16
 #define pHDown 17
@@ -137,20 +135,29 @@ float ph = 0;
 TaskHandle_t monitorCore;
 TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
-SemaphoreHandle_t eepromSemaphore;
+//SemaphoreHandle_t eepromSemaphore;
 SemaphoreHandle_t flashSemaphore;
 
-simpleTimer updateDB(25000);
+simpleTimer updateDB(5000); //update every 10 minutes
 WiFiClient client;
 BluetoothSerial SerialBT;
 Preferences preferences;
 simpleTimer wifiTimer(20000); //Try to connect to WiFi for 20 seconds
 const char* ntpServer = "pool.ntp.org";
-const long  gmtOffset_sec = -25200;
-const int   daylightOffset_sec = 3600;
+//const long  gmtOffset_sec = -25200;
+//const int   daylightOffset_sec = 3600;
+const long  gmtOffset_sec = 0;
+const int   daylightOffset_sec = 0;
+//ESP32Time rtc;
+ESP32Time rtc(gmtOffset_sec);  // offset in seconds GMT+1
+
+//Lights
+bool lightState = false;
+int lightOnTime = 1234;
+int lightOffTime = 2345;
 
 String ssid_pass;
-String adapterString;
+//String adapterString;
 int adapterLength;
 String bleMessage;
 
@@ -165,8 +172,8 @@ char *passArr;
 char* bleNameArr;
 String bleNameString = "Hydroponic";
 String bleNameTemp = "";
-char macArr[17];
-char * key;
+//char macArr[17];
+//char * key;
 
 #define SW 19
 
@@ -178,6 +185,9 @@ void monitorTask(void * pvParameters);
 
 //Http client for db
 HTTPClient http;
+
+//Time
+String tz = "MST7MDT,M3.2.0,M11.1.0";
 
 void setup() {
   Wire.begin();
@@ -202,7 +212,7 @@ void setup() {
   ecTimer.initialize();
   changeVar.initialize();
   wifiTimer.initialize();
-  
+
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));
   }
@@ -225,6 +235,45 @@ void setup() {
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 }
 
+void lightControl(){
+  int lightTime = rtc.getHour(true)*100 + rtc.getMinute();
+  Serial.print("LightTime: ");
+  Serial.println(lightTime);
+  if(lightTime >= lightOffTime){
+      if(lightState){
+        //turn lights off
+        lightState = false;
+      }
+    }
+
+  if(lightTime >= lightOnTime){
+      if(lightState){
+        //turn lights off
+        lightState = false;
+      }
+    }
+}
+
+bool initTime(String timezone) {
+  configTime(0, 0, ntpServer);
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    rtc.setTimeStruct(timeinfo);
+    Serial.println("Obtained current time");
+    setTimezone(timezone);
+    writeMessage(rtc.getDateTime(true));
+    return true;
+  }
+  Serial.println("Could not obtain current time");
+  return false;
+}
+
+void setTimezone(String timezone){
+  //Serial.printf("  Setting Timezone to %s\n",timezone.c_str());
+  setenv("TZ",timezone.c_str(),1);
+  tzset();
+}
+
 //void writeMessage(const __FlashStringHelper * message) {
 void writeMessage(String message) {
   display.clearDisplay();
@@ -240,7 +289,7 @@ void writeMessage(String message) {
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
-
+    
     //If ble button has been pressed, restart to enter ble mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -248,42 +297,18 @@ void dataLoggingTask(void *pvParameters) {
 
     if (updateDB.triggered()) {
       if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("dataLoggingTask no wifi");
+        Serial.println("Cannot update database. WIFI not connected.");
         writeMessage(F("WIFI NOT\nCONNECTED"));
         connectWiFi();
       }
       else {
-        struct tm timeinfo;
-        String dateTimeString;
-        if (getLocalTime(&timeinfo)) {
-          char timeStringBuff[25]; //25 char array to hold dtg
-          strftime(timeStringBuff, sizeof(timeStringBuff), "%Y%B%d%H%M%S", &timeinfo); //YYYYMMDDHHMMSS
-          String asString(timeStringBuff);
-          asString.replace("January", "01");
-          asString.replace("February", "02");
-          asString.replace("March", "03");
-          asString.replace("April", "04");
-          asString.replace("May", "05");
-          asString.replace("June", "06");
-          asString.replace("July", "07");
-          asString.replace("August", "08");
-          asString.replace("September", "09");
-          asString.replace("October", "10");
-          asString.replace("November", "11");
-          asString.replace("December", "12");
-          dateTimeString = asString;
-          Serial.println("Obtained current time");
-        }
-        else {
-          Serial.println("Failed to obtain time");
-          dateTimeString = "000000000000"; //default time placeholder
-        }
-
+        initTime(tz);
+        Serial.println(rtc.getDateTime(true));
         //Take mutex, write url string, return mutex.
         if (commSemaphore != NULL) {
           if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
             Serial.println("Grabbing mutex in dataLoggingTask");
-            String urlFinal = URL + "device=" + device + "&dtg=" + dateTimeString + "&ph=" + ph + "&ec=" + ec + "&temp=" + temperature;
+            String urlFinal = URL + "device=" + device + "&dtg=" + rtc.getTime("%d%b%y%H%M%S") + "&ph=" + ph + "&ec=" + ec + "&temp=" + temperature;
             xSemaphoreGive(commSemaphore);
 
             http.begin(urlFinal.c_str());
@@ -315,7 +340,7 @@ void connectWiFi() {
     writeMessage(F("Connecting WIFI"));
     while (WiFi.status() != WL_CONNECTED)
     {
-      
+
       delay(500);
       //Serial.print(F("."));
       //Try for 20 seconds
@@ -334,6 +359,7 @@ void connectWiFi() {
 
 bool getSettings() {
   bool ssidSet = false;
+  String adapterString;
   free(ssidArr); //Free allocated memory
   free(passArr); //Free allocated memory
 
@@ -405,7 +431,7 @@ void bleSettings(int buttonPressed) {
       bleFlag = false;
       xSemaphoreGive(flashSemaphore);
     }
-    
+
     while (SerialBT.available()) {
       preferences.begin("WiFiLogin", false);
       String bleMessage = SerialBT.readString();
@@ -479,6 +505,8 @@ void monitorTask(void * pvParameters) {
 
     check_ec();
 
+    lightControl();
+
   }
 }
 
@@ -506,7 +534,7 @@ bool check_ec() {
         Serial.println(F("Returned mutex in check_ec"));
       }
     }
-    
+
     ecPumpControl(ecValue25);
     return true;
   }
@@ -582,17 +610,17 @@ void phPumpControl(float reading) {
 
 //Removed timer. Converted to blocking call to prevent sensor readings when pump is on.
 void mainPumpControl() {
-      Serial.println("Circulation pump on");
-      writeMessage(F("Circulation\npump on"));
-      digitalWrite(circulation, HIGH);
-      delay(100000);
-      Serial.println("Circulation pump off");
-      digitalWrite(circulation, LOW);
-      display.clearDisplay(); 
+  Serial.println("Circulation pump on");
+  writeMessage(F("Circulation\npump on"));
+  digitalWrite(circulation, HIGH);
+  delay(1000);
+  Serial.println("Circulation pump off");
+  digitalWrite(circulation, LOW);
+  display.clearDisplay();
 }
 
 /*
-void mainPumpControl() {
+  void mainPumpControl() {
   if (!pumpOn) {
     //check if it's time to turn on
     if (mainPumpOn.triggered()) {
@@ -614,7 +642,7 @@ void mainPumpControl() {
       display.clearDisplay();
     }
   }
-}
+  }
 */
 
 //empty loop required by ESP32. Loops are handled in tasks.
