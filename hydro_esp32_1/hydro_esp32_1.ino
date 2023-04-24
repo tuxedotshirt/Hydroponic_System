@@ -99,18 +99,19 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 //Temperature sensor
 #define TdsSensorPin 34
-//#define oneWireBus 4
+#define oneWireBus 4
 float temperature = 22, tdsValue = 0, kValue = 1.0;
-//OneWire oneWire(oneWireBus);
-//DallasTemperature sensors(&oneWire);
+OneWire oneWire(oneWireBus);
+DallasTemperature sensors(&oneWire);
 
 //EC Probe
-float ecSetting = 2000;
+float ecSetting = 0;
 float ecTemp = 0;
 #define ecInterval 5000
 #define ecAdjustInterval 5000
 simpleTimer ecTimer(ecInterval);
-float ec = 0;
+float ec = 2000;
+float kVal = 1.0;
 
 //pH Probe
 float phSetting = 7;
@@ -166,6 +167,8 @@ String bleMessage;
 #define pHPref "pHSetting"
 #define bleNamePref "bleNameSetting"
 #define ssidPref "ssidPref"
+#define ecZero "EC"
+#define kValue "kValue"
 
 char *ssidArr;
 char *passArr;
@@ -218,16 +221,16 @@ void setup() {
   }
 
   //Start ble during startup
-  //In the event that the device has been named already, get whatever settings are available before calling bleSettings
+  //In the event that the device has been named already, get whatever settings are available before calling settings
   getSettings();
-  bleSettings(digitalRead(SW));
+  settings(digitalRead(SW));
   getSettings();
-  writeMessage(bleNameString);
-  delay(1000);
+  //writeMessage(bleNameString);
+  //delay(1000);
   //If wifi has been set before, just reconnect and carry on.
   connectWiFi();
 
-  //Assign tasks to cores
+  //Assign tasks to cores and create mutexes
   commSemaphore = xSemaphoreCreateMutex();
   flashSemaphore = xSemaphoreCreateMutex();
 
@@ -235,23 +238,176 @@ void setup() {
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 }
 
-void lightControl(){
-  int lightTime = rtc.getHour(true)*100 + rtc.getMinute();
+void setEC() {
+  writeMessage("Place probe in\nnutrient solution\nto set desired EC.");
+  delay(5000);
+  for (int i = 60; i >= 0; i--) {
+    writeMessage("Stabilizing reading.\nHold button to exit.\n" + String(i) + " s remaining");
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(5000);
+      ESP.restart();
+    }
+  }
+  //take reading, save to preferences.
+  sensors.requestTemperatures();
+  float temperatureReading = sensors.getTempCByIndex(0);
+  //float temperatureReading = temperature;
+  float analogValue = analogRead(TdsSensorPin);
+  float voltage = analogValue / 4096 * 3.3;
+  float ecValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * kVal;
+  float ecValue25  =  ecValue / (1.0 + 0.02 * (temperatureReading - 25.0)); //temperature compensation
+
+  preferences.begin("WiFiLogin", false);
+  preferences.putFloat(ecZero, ecValue25);
+  preferences.end();
+  writeMessage("EC Point set: " + String(ecValue25) + " uS");
+  delay(5000);
+
+  for (int i = 10; i >= 0; i--) {
+    writeMessage("Press button to return\n to SETTINGS\n" + String(i) + "s remaining");
+    if (!digitalRead(SW)) {
+      settings(digitalRead(SW));
+    }
+    delay(1000);
+  }
+  
+  writeMessage("Exiting");
+  delay(2500);
+  ESP.restart();
+}
+
+void calibrateEC() {
+  float KValueTemp;
+  //rawECsolution is given in ppm
+  float rawECsolution = 1000;
+  float voltage = 3.3;
+
+  writeMessage("EC Calibration\nRelease button.");
+  delay(5000);
+  for (int i = 10; i >= 0; i--) {
+    writeMessage("Hold to set EC. " + String(i));
+    if (!digitalRead(SW)) {
+      setEC();
+      delay(1000);
+    }
+  }
+  writeMessage("Place probe in \n2000uS buffer\nsolution");
+  delay(10000);
+  for (int i = 60; i >= 0; i--) {
+    writeMessage("Reading. Hold button\nto skip and\nset EC point.\n" + String(i) + " seconds remaining");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(5000);
+      ESP.restart();
+    }
+  }
+  //rawECsolution = rawECsolution * (1.0 + 0.02 * (temperature - 25.0));
+  rawECsolution = rawECsolution * 2; //convert from tds to EC
+  rawECsolution = rawECsolution * (1.0 + 0.02 * (temperature - 25.0));
+  KValueTemp = rawECsolution / (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage); //calibrate in the  buffer solution, EC 2000uS, NaCl 1000ppm
+  if ((rawECsolution > 0) && (rawECsolution <= 2000) && (KValueTemp > 0.25) && (KValueTemp < 4.0))
+  {
+    Serial.print(KValueTemp);
+    preferences.begin("WiFiLogin", false);
+    preferences.putFloat(kValue, KValueTemp);
+    preferences.end();
+    writeMessage("EC Calibration\nsuccessful.\nPress button to return\nto Settings.");
+    
+    for (int i = 10; i >= 0; i--) {
+      settings(digitalRead(SW));
+      delay(1000);
+    }
+  }
+  else {
+    writeMessage("EC Calibration failed.\nPress button to return\nto Settings.");
+    for (int i = 10; i >= 0; i--) {
+      settings(digitalRead(SW));
+      delay(1000);
+    }
+  }
+  ESP.restart();
+
+
+}
+
+//give user 30s to place probe in solution, 30s to rinse and place in next solution
+void calibratePH() {
+  writeMessage("pH Calibration\nRelease button");
+  delay(5000);
+
+  for (int i = 10; i >= 0; i--) {
+    writeMessage("Hold for EC \ncalibration.\npH calibration in " + String(i));
+    if (!digitalRead(SW)) {
+      calibrateEC();
+      delay(1000);
+    }
+  }
+
+
+  for (int i = 30; i >= 0; i--) {
+    writeMessage("Place probe in\n4 pH solution.\n" + String(i) + " seconds remaining.\nHold to exit.");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(2500);
+      ESP.restart();
+    }
+  }
+  //Calibrate pH = 4
+  //ph.cal_low();
+  writeMessage("pH=4 COMPLETE");
+  delay(5000);
+
+  for (int i = 10; i >= 0; i--) {
+    writeMessage("Rinse probe.\n" + String(i) + " seconds remaining.\nHold to exit.");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(2500);
+      ESP.restart();
+    }
+  }
+
+  for (int i = 30; i >= 0; i--) {
+    writeMessage("Place probe in 7 pH \nsolution.\n" + String(i) + " s remaining.\nHold to exit");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(2500);
+      ESP.restart();
+    }
+  }
+  //Calibrate pH = 7
+  //ph.cal_mid();
+  writeMessage("pH=7 COMPLETE");
+  delay(5000);
+
+  writeMessage("Rinse probe.");
+  delay(10000);
+  writeMessage("pH CALIBRATION \nCOMPLETE");
+  delay(5000);
+  calibrateEC();
+}
+
+void lightControl() {
+  int lightTime = rtc.getHour(true) * 100 + rtc.getMinute();
   Serial.print("LightTime: ");
   Serial.println(lightTime);
-  if(lightTime >= lightOffTime){
-      if(lightState){
-        //turn lights off
-        lightState = false;
-      }
+  if (lightTime >= lightOffTime) {
+    if (lightState) {
+      //turn lights off
+      lightState = false;
     }
+  }
 
-  if(lightTime >= lightOnTime){
-      if(lightState){
-        //turn lights off
-        lightState = false;
-      }
+  if (lightTime >= lightOnTime) {
+    if (lightState) {
+      //turn lights off
+      lightState = false;
     }
+  }
 }
 
 bool initTime(String timezone) {
@@ -268,9 +424,8 @@ bool initTime(String timezone) {
   return false;
 }
 
-void setTimezone(String timezone){
-  //Serial.printf("  Setting Timezone to %s\n",timezone.c_str());
-  setenv("TZ",timezone.c_str(),1);
+void setTimezone(String timezone) {
+  setenv("TZ", timezone.c_str(), 1);
   tzset();
 }
 
@@ -289,7 +444,7 @@ void writeMessage(String message) {
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
-    
+
     //If ble button has been pressed, restart to enter ble mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -394,16 +549,35 @@ bool getSettings() {
     //Serial.print("Got bleNameString here: ");
     //Serial.println(bleNameString);
   }
+  if (preferences.isKey(ecZero)) {
+    ecSetting = preferences.getFloat(ecZero);
+  }
+  if (preferences.isKey(kValue)) {
+    kVal = preferences.getFloat(kValue);
+  }
   preferences.end();
 
   return ssidSet;
 }
 
-//void bleSettings(int buttonPressed) {
-void bleSettings(int buttonPressed) {
-  bool settingsChanged = false;
-  writeMessage(F("Bluetooth"));
+//void settings(int buttonPressed) {
+void settings(int buttonPressed) {
   if (buttonPressed == 0) {
+    writeMessage("SETTINGS\nRelease button.");
+    delay(5000);
+
+
+    for (int i = 10; i >= 0; i--) {
+      writeMessage("Hold for pH/EC\ncalibration. \nBLE mode begins in " + String(i));
+      if (!digitalRead(SW)) {
+        calibratePH();
+        delay(1000);
+      }
+    }
+
+    bool settingsChanged = false;
+    writeMessage(F("Bluetooth\nConnect app."));
+    //if (buttonPressed == 0) {
 
     Serial.println("beginning SerialBT");
     Serial.println(F(bleNameString));
@@ -417,82 +591,83 @@ void bleSettings(int buttonPressed) {
     bleFlag = true;
     changeVar.reset();
     Serial.println(F("BLE button pressed!"));
-  }
-  else {
+    //}
+    //else {
     delay(10);
-  }
-  while (bleFlag == true) {
-    //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
-    delay(50);
+    //}
+    while (bleFlag == true) {
+      //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
+      delay(50);
 
-    //timer to exit bluetooth mode
-    if (changeVar.triggered()) {
-      Serial.println(F("changeVar triggered"));
-      bleFlag = false;
-      xSemaphoreGive(flashSemaphore);
+      //timer to exit bluetooth mode
+      if (changeVar.triggered()) {
+        Serial.println(F("changeVar triggered"));
+        bleFlag = false;
+        xSemaphoreGive(flashSemaphore);
+      }
+
+      while (SerialBT.available()) {
+        preferences.begin("WiFiLogin", false);
+        String bleMessage = SerialBT.readString();
+        char tempArr[bleMessage.length() + 1];
+        bleMessage.toCharArray(tempArr, bleMessage.length() + 1);
+        if (bleMessage.length() >= 1) {
+          //bleFlag = false;
+        }
+        ssidArr = strtok(tempArr, ",");
+        //Serial.print("ssidArr: ");
+        //Serial.println(String(ssidArr));
+        if (String(ssidArr) != "?") {
+          preferences.putString(ssidPref, String(ssidArr));
+          //Serial.print("Saved ssid: ");
+          //Serial.println(preferences.getString(ssidPref));
+          bleFlag = false;
+          settingsChanged  = true;
+        }
+        passArr = strtok(NULL, ",");
+        if (String(passArr) != "?") {
+          preferences.putString(pwdPref, String(passArr));
+          bleFlag = false;
+          settingsChanged  = true;
+        }
+        bleNameTemp = String(strtok(NULL, ","));
+        if (bleNameTemp != "?") {
+          preferences.putString(bleNamePref, bleNameTemp);
+          Serial.print("bleName: ");
+          Serial.println(preferences.getString(bleNamePref));
+          bleFlag = false;
+          settingsChanged = true;
+        }
+        phTemp = atof(strtok(NULL, ","));
+        if (phTemp > 0.00) {
+          preferences.putFloat(pHPref, phTemp);
+          //Serial.print("Saved pHSetting: ");
+          //Serial.println(preferences.getFloat("pHSetting"));
+          phSetting = preferences.getFloat(pHPref);
+          bleFlag = false;
+          settingsChanged = true;
+        }
+        ecTemp = atoi(strtok(NULL, ","));
+        if (ecTemp > 0.00) {
+          preferences.putFloat(ecPref, ecTemp);
+          //Serial.print("Saved ecSetting: ");
+          //Serial.println(preferences.getFloat(ecPref));
+          ecSetting = preferences.getFloat(ecPref);
+          bleFlag = false;
+          settingsChanged  = true;
+        }
+        //add deploymentID to preferences
+
+        //add BLE display name to preferences
+        preferences.end();
+        //break;
+
+      }
     }
-
-    while (SerialBT.available()) {
-      preferences.begin("WiFiLogin", false);
-      String bleMessage = SerialBT.readString();
-      char tempArr[bleMessage.length() + 1];
-      bleMessage.toCharArray(tempArr, bleMessage.length() + 1);
-      if (bleMessage.length() >= 1) {
-        //bleFlag = false;
-      }
-      ssidArr = strtok(tempArr, ",");
-      //Serial.print("ssidArr: ");
-      //Serial.println(String(ssidArr));
-      if (String(ssidArr) != "?") {
-        preferences.putString(ssidPref, String(ssidArr));
-        //Serial.print("Saved ssid: ");
-        //Serial.println(preferences.getString(ssidPref));
-        bleFlag = false;
-        settingsChanged  = true;
-      }
-      passArr = strtok(NULL, ",");
-      if (String(passArr) != "?") {
-        preferences.putString(pwdPref, String(passArr));
-        bleFlag = false;
-        settingsChanged  = true;
-      }
-      bleNameTemp = String(strtok(NULL, ","));
-      if (bleNameTemp != "?") {
-        preferences.putString(bleNamePref, bleNameTemp);
-        Serial.print("bleName: ");
-        Serial.println(preferences.getString(bleNamePref));
-        bleFlag = false;
-        settingsChanged = true;
-      }
-      phTemp = atof(strtok(NULL, ","));
-      if (phTemp > 0.00) {
-        preferences.putFloat(pHPref, phTemp);
-        //Serial.print("Saved pHSetting: ");
-        //Serial.println(preferences.getFloat("pHSetting"));
-        phSetting = preferences.getFloat(pHPref);
-        bleFlag = false;
-        settingsChanged = true;
-      }
-      ecTemp = atoi(strtok(NULL, ","));
-      if (ecTemp > 0.00) {
-        preferences.putFloat(ecPref, ecTemp);
-        //Serial.print("Saved ecSetting: ");
-        //Serial.println(preferences.getFloat(ecPref));
-        ecSetting = preferences.getFloat(ecPref);
-        bleFlag = false;
-        settingsChanged  = true;
-      }
-      //add deploymentID to preferences
-
-      //add BLE display name to preferences
-      preferences.end();
-      //break;
-
+    if (bleFlag == false && settingsChanged) {
+      //restart and use preferences to connect to wifi
+      ESP.restart();
     }
-  }
-  if (bleFlag == false && settingsChanged) {
-    //restart and use preferences to connect to wifi
-    ESP.restart();
   }
 }
 
@@ -514,16 +689,16 @@ void monitorTask(void * pvParameters) {
 bool check_ec() {
   if (ecTimer.triggered()) {
     writeMessage(F("Checking EC"));
-    //sensors.requestTemperatures();
-    //float temperatureReading = sensors.getTempCByIndex(0);
-    float temperatureReading = temperature;
+    sensors.requestTemperatures();
+    float temperatureReading = sensors.getTempCByIndex(0);
+    //float temperatureReading = temperature;
     //Serial.print("temp: ");
     //Serial.println(temperature);
     float analogValue = analogRead(TdsSensorPin);
     float voltage = analogValue / 4096 * 3.3;
-    float ecValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * kValue;
+    float ecValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * kVal;
     float ecValue25  =  ecValue / (1.0 + 0.02 * (temperatureReading - 25.0)); //temperature compensation
-    float tdsValue = ecValue25 * TdsFactor;
+
     //access shared resources to update transmitted value, but continues autonomously if value can't be accessed
     if (commSemaphore != NULL) {
       if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
@@ -574,7 +749,7 @@ bool check_pH() {
 
 //blocking function, do not want to take readings from sensors with pumps running
 void ecPumpControl(float reading) {
-  if (reading <= (ecSetting - 500)) {
+  if (reading <= (ecSetting * 0.85)) {
     Serial.println(F("Adjusting nutrients"));
     writeMessage(F("Adjusting \nnutrients"));
     digitalWrite(nutrients, HIGH);
