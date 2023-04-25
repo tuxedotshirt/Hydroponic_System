@@ -271,7 +271,7 @@ void setEC() {
     }
     delay(1000);
   }
-  
+
   writeMessage("Exiting");
   delay(2500);
   ESP.restart();
@@ -314,7 +314,7 @@ void calibrateEC() {
     preferences.putFloat(kValue, KValueTemp);
     preferences.end();
     writeMessage("EC Calibration\nsuccessful.\nPress button to return\nto Settings.");
-    
+
     for (int i = 10; i >= 0; i--) {
       settings(digitalRead(SW));
       delay(1000);
@@ -344,7 +344,6 @@ void calibratePH() {
       delay(1000);
     }
   }
-
 
   for (int i = 30; i >= 0; i--) {
     writeMessage("Place probe in\n4 pH solution.\n" + String(i) + " seconds remaining.\nHold to exit.");
@@ -445,7 +444,7 @@ void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
 
-    //If ble button has been pressed, restart to enter ble mode
+    //If ble button has been pressed, restart to enter settings mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
     }
@@ -562,112 +561,270 @@ bool getSettings() {
 
 //void settings(int buttonPressed) {
 void settings(int buttonPressed) {
+
   if (buttonPressed == 0) {
-    writeMessage("SETTINGS\nRelease button.");
-    delay(5000);
 
+    simpleTimer secondTimer(1000);
+    simpleTimer buttonHold(2000);
+    simpleTimer exitTimer(10000);
+    secondTimer.initialize();
+    buttonHold.initialize();
+    exitTimer.initialize();
+    bool buttonPressed = true;
+    bool exitTimerTriggered = false;
 
-    for (int i = 10; i >= 0; i--) {
-      writeMessage("Hold for pH/EC\ncalibration. \nBLE mode begins in " + String(i));
+settingsMenu:
+    writeMessage("SETTINGS\nPress to scroll.\nHold to select.");
+
+    //Allow user to let go of button before moving on
+    while (buttonPressed) {
+      //if the button has been let go
+      if (digitalRead(SW)) {
+        buttonPressed = false;
+      }
+      //debounce button
+      delay(200);
       if (!digitalRead(SW)) {
-        calibratePH();
-        delay(1000);
+        buttonPressed = true;
+      }
+      else{
+        break;
       }
     }
 
-    bool settingsChanged = false;
-    writeMessage(F("Bluetooth\nConnect app."));
-    //if (buttonPressed == 0) {
-
-    Serial.println("beginning SerialBT");
-    Serial.println(F(bleNameString));
-    if (!SerialBT.begin(bleNameString))
-    {
-      Serial.println(F("An error occurred initializing Bluetooth"));
-    }
-    else {
-      Serial.println(F("Initialized Bluetooth"));
-    }
-    bleFlag = true;
-    changeVar.reset();
-    Serial.println(F("BLE button pressed!"));
-    //}
-    //else {
-    delay(10);
-    //}
-    while (bleFlag == true) {
-      //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
-      delay(50);
-
-      //timer to exit bluetooth mode
-      if (changeVar.triggered()) {
-        Serial.println(F("changeVar triggered"));
-        bleFlag = false;
-        xSemaphoreGive(flashSemaphore);
+    //Check to see if user pushes button to begin scrolling
+    exitTimer.reset();
+    while (!buttonPressed) {
+      if (!digitalRead(SW)) {
+        buttonPressed = true;
+        exitTimer.reset();
       }
-
-      while (SerialBT.available()) {
-        preferences.begin("WiFiLogin", false);
-        String bleMessage = SerialBT.readString();
-        char tempArr[bleMessage.length() + 1];
-        bleMessage.toCharArray(tempArr, bleMessage.length() + 1);
-        if (bleMessage.length() >= 1) {
-          //bleFlag = false;
-        }
-        ssidArr = strtok(tempArr, ",");
-        //Serial.print("ssidArr: ");
-        //Serial.println(String(ssidArr));
-        if (String(ssidArr) != "?") {
-          preferences.putString(ssidPref, String(ssidArr));
-          //Serial.print("Saved ssid: ");
-          //Serial.println(preferences.getString(ssidPref));
-          bleFlag = false;
-          settingsChanged  = true;
-        }
-        passArr = strtok(NULL, ",");
-        if (String(passArr) != "?") {
-          preferences.putString(pwdPref, String(passArr));
-          bleFlag = false;
-          settingsChanged  = true;
-        }
-        bleNameTemp = String(strtok(NULL, ","));
-        if (bleNameTemp != "?") {
-          preferences.putString(bleNamePref, bleNameTemp);
-          Serial.print("bleName: ");
-          Serial.println(preferences.getString(bleNamePref));
-          bleFlag = false;
-          settingsChanged = true;
-        }
-        phTemp = atof(strtok(NULL, ","));
-        if (phTemp > 0.00) {
-          preferences.putFloat(pHPref, phTemp);
-          //Serial.print("Saved pHSetting: ");
-          //Serial.println(preferences.getFloat("pHSetting"));
-          phSetting = preferences.getFloat(pHPref);
-          bleFlag = false;
-          settingsChanged = true;
-        }
-        ecTemp = atoi(strtok(NULL, ","));
-        if (ecTemp > 0.00) {
-          preferences.putFloat(ecPref, ecTemp);
-          //Serial.print("Saved ecSetting: ");
-          //Serial.println(preferences.getFloat(ecPref));
-          ecSetting = preferences.getFloat(ecPref);
-          bleFlag = false;
-          settingsChanged  = true;
-        }
-        //add deploymentID to preferences
-
-        //add BLE display name to preferences
-        preferences.end();
-        //break;
-
+      if (exitTimer.triggered()) {
+        ESP.restart();
       }
     }
-    if (bleFlag == false && settingsChanged) {
-      //restart and use preferences to connect to wifi
-      ESP.restart();
+    delay(500);
+bluetoothMenu:
+    writeMessage("BLUETOOTH");
+    //delay(500);
+    exitTimer.reset();
+    while (true) {
+      //if the button has been pressed
+      if (!digitalRead(SW)) {
+        exitTimer.reset();
+        delay(500);
+        //if the button is still being pressed
+        if (!digitalRead(SW)) {
+          //ble function
+          writeMessage("ble function");
+          delay(1000);
+          goto bluetoothMenu;
+        }
+        else {
+          break;
+        }
+      }
+      if (exitTimer.triggered()) {
+        ESP.restart();
+      }
     }
+calibratepHMenu:
+    exitTimer.reset();
+    writeMessage("Calibrate pH probe");
+    while (true) {
+      //if the button has been pressed
+      if (!digitalRead(SW)) {
+        exitTimer.reset();
+        delay(500);
+        //if the button is still being pressed
+        if (!digitalRead(SW)) {
+          //calibrate pH probe
+          writeMessage("cal pH function");
+          delay(1000);
+          goto calibratepHMenu;
+        }
+        else {
+          break;
+        }
+      }
+      if (exitTimer.triggered()) {
+        ESP.restart();
+      }
+    }
+
+calibrateECMenu:
+    exitTimer.reset();
+    writeMessage("Calibrate EC probe");
+    while (true) {
+      //if the button has been pressed
+      if (!digitalRead(SW)) {
+        exitTimer.reset();
+        delay(500);
+        //if the button is still being pressed
+        if (!digitalRead(SW)) {
+          //calibrate EC probe
+          writeMessage("cal ec function");
+          delay(1000);
+          goto calibrateECMenu;
+        }
+        else {
+          break;
+        }
+      }
+      if (exitTimer.triggered()) {
+        ESP.restart();
+      }
+    }
+
+setECMenu:
+    exitTimer.reset();
+    writeMessage("Set EC point");
+    while (true) {
+      //if the button has been pressed
+      if (!digitalRead(SW)) {
+        exitTimer.reset();
+        delay(500);
+        //if the button is still being pressed
+        if (!digitalRead(SW)) {
+          //set EC point
+          writeMessage("set ec function");
+          delay(1000);
+          goto setECMenu;
+        }
+        else {
+          break;
+        }
+      }
+      if (exitTimer.triggered()) {
+        ESP.restart();
+      }
+    }
+
+    exitTimer.reset();
+    writeMessage("EXIT SETTINGS");
+    while (true) {
+      //if the button has been pressed
+      if (!digitalRead(SW)) {
+        exitTimer.reset();
+        delay(500);
+        //if the button is still being pressed
+        if (!digitalRead(SW)) {
+          writeMessage("");
+          delay(1000);
+          ESP.restart();
+        }
+        else {
+          goto settingsMenu;
+        }
+      }
+      if (exitTimer.triggered()) {
+        ESP.restart();
+      }
+    }
+
+    /*for (int i = 10; i >= 0; i--) {
+        writeMessage("Hold for pH/EC\ncalibration. \nBLE mode begins in " + String(i));
+        if (!digitalRead(SW)) {
+          calibratePH();
+          delay(1000);
+        }
+      }
+    */
+    /*
+        bool settingsChanged = false;
+        writeMessage(F("Bluetooth\nConnect app."));
+        //if (buttonPressed == 0) {
+
+        Serial.println("beginning SerialBT");
+        Serial.println(F(bleNameString));
+        if (!SerialBT.begin(bleNameString))
+        {
+          Serial.println(F("An error occurred initializing Bluetooth"));
+        }
+        else {
+          Serial.println(F("Initialized Bluetooth"));
+        }
+        bleFlag = true;
+        changeVar.reset();
+        Serial.println(F("BLE button pressed!"));
+        //}
+        //else {
+        delay(10);
+        //}
+        while (bleFlag == true) {
+          //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
+          delay(50);
+
+          //timer to exit bluetooth mode
+          if (changeVar.triggered()) {
+            Serial.println(F("changeVar triggered"));
+            bleFlag = false;
+            xSemaphoreGive(flashSemaphore);
+          }
+
+          while (SerialBT.available()) {
+            preferences.begin("WiFiLogin", false);
+            String bleMessage = SerialBT.readString();
+            char tempArr[bleMessage.length() + 1];
+            bleMessage.toCharArray(tempArr, bleMessage.length() + 1);
+            if (bleMessage.length() >= 1) {
+              //bleFlag = false;
+            }
+            ssidArr = strtok(tempArr, ",");
+            //Serial.print("ssidArr: ");
+            //Serial.println(String(ssidArr));
+            if (String(ssidArr) != "?") {
+              preferences.putString(ssidPref, String(ssidArr));
+              //Serial.print("Saved ssid: ");
+              //Serial.println(preferences.getString(ssidPref));
+              bleFlag = false;
+              settingsChanged  = true;
+            }
+            passArr = strtok(NULL, ",");
+            if (String(passArr) != "?") {
+              preferences.putString(pwdPref, String(passArr));
+              bleFlag = false;
+              settingsChanged  = true;
+            }
+            bleNameTemp = String(strtok(NULL, ","));
+            if (bleNameTemp != "?") {
+              preferences.putString(bleNamePref, bleNameTemp);
+              Serial.print("bleName: ");
+              Serial.println(preferences.getString(bleNamePref));
+              bleFlag = false;
+              settingsChanged = true;
+            }
+            phTemp = atof(strtok(NULL, ","));
+            if (phTemp > 0.00) {
+              preferences.putFloat(pHPref, phTemp);
+              //Serial.print("Saved pHSetting: ");
+              //Serial.println(preferences.getFloat("pHSetting"));
+              phSetting = preferences.getFloat(pHPref);
+              bleFlag = false;
+              settingsChanged = true;
+            }
+            ecTemp = atoi(strtok(NULL, ","));
+            if (ecTemp > 0.00) {
+              preferences.putFloat(ecPref, ecTemp);
+              //Serial.print("Saved ecSetting: ");
+              //Serial.println(preferences.getFloat(ecPref));
+              ecSetting = preferences.getFloat(ecPref);
+              bleFlag = false;
+              settingsChanged  = true;
+            }
+            //add deploymentID to preferences
+
+            //add BLE display name to preferences
+            preferences.end();
+            //break;
+
+          }
+        }
+        if (bleFlag == false && settingsChanged) {
+          //restart and use preferences to connect to wifi
+          ESP.restart();
+        }
+    */
   }
 }
 
