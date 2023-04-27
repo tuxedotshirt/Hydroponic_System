@@ -36,37 +36,17 @@
   D2 ------------ 32
 */
 
-
-/*
-   Pins required:
-   3x4 for peristaltic pumps
-   1 for ec probe
-   2 - RX/TX for pH
-   1 for light relay
-   1 for button
-   1 for main pump relay
-
-   1 for status led
-*/
 /*TODO:
-    remove temperature probe. Can be assumed to be ~20 degrees.
     send reset request over ble for factory settings
     Save deploymentID for DB from app
-    USE EC PROBE FOR WATER LEVEL DETECTION. IF 0, WATER LEVEL IS LOW.
-
+    use ec probe for low water level detection. 0 means water is low
+    Add light on/off times to app
+    Add error led to pcb
     ph and ec adjustment error - denotes chemicals are low
-    1 pin nutrient tank level sensor
-    1 pin for light relay
+    1 pin tank overflow level sensor
+    Add manual time entry
 */
 
-/*
-   Available pins:
-
-   34
-   33 might brick wifi?
-   35 input only
-
-*/
 
 #include <Wire.h>
 #include <EEPROM.h>
@@ -122,15 +102,20 @@ simpleTimer phTimer(phInterval);
 Ezo_board pH = Ezo_board(99, "pH");  //i2c address of pH EZO board is 99
 float ph = 0;
 
-//MOSFETS
+//Pin definitions
 #define circulation 15
 #define pHUp 16
 #define pHDown 17
-#define nutrients 18
+#define part1 18
 #define lights 23
-#define spare 27
-
+#define part2 27
+#define part3 25
+#define errorLED 13
 #define button 19
+
+float ratio1 = 1500;
+float ratio2 = 2300;
+float ratio3 = 1700;
 
 //RTOS
 TaskHandle_t monitorCore;
@@ -145,12 +130,8 @@ BluetoothSerial SerialBT;
 Preferences preferences;
 simpleTimer wifiTimer(20000); //Try to connect to WiFi for 20 seconds
 const char* ntpServer = "pool.ntp.org";
-//const long  gmtOffset_sec = -25200;
-//const int   daylightOffset_sec = 3600;
-const long  gmtOffset_sec = 0;
-const int   daylightOffset_sec = 0;
 //ESP32Time rtc;
-ESP32Time rtc(gmtOffset_sec);  // offset in seconds GMT+1
+ESP32Time rtc(0);
 
 //Lights
 bool lightState = false;
@@ -201,15 +182,21 @@ void setup() {
   pinMode(pHUp, OUTPUT);
   pinMode(pHDown, OUTPUT);
   pinMode(circulation, OUTPUT);
-  pinMode(nutrients, OUTPUT);
+  pinMode(part1, OUTPUT);
   pinMode(lights, OUTPUT);
-  pinMode(spare, OUTPUT);
+  pinMode(part2, OUTPUT);
+  pinMode(part3, OUTPUT);
+  pinMode(errorLED, OUTPUT);
+  
   digitalWrite(pHUp, LOW);
   digitalWrite(pHDown, LOW);
   digitalWrite(circulation, LOW);
-  digitalWrite(nutrients, LOW);
+  digitalWrite(part1, LOW);
   digitalWrite(lights, LOW);
-  digitalWrite(spare, LOW);
+  digitalWrite(part2, LOW);
+  digitalWrite(part3, LOW);
+  digitalWrite(errorLED, LOW);
+  
   delay(50);
   phTimer.initialize();
   ecTimer.initialize();
@@ -416,7 +403,7 @@ bool initTime(String timezone) {
     rtc.setTimeStruct(timeinfo);
     Serial.println("Obtained current time");
     setTimezone(timezone);
-    writeMessage(rtc.getDateTime(true));
+    //writeMessage(rtc.getDateTime(true));
     return true;
   }
   Serial.println("Could not obtain current time");
@@ -457,7 +444,7 @@ void dataLoggingTask(void *pvParameters) {
       }
       else {
         initTime(tz);
-        Serial.println(rtc.getDateTime(true));
+        //Serial.println(rtc.getDateTime(true));
         //Take mutex, write url string, return mutex.
         if (commSemaphore != NULL) {
           if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
@@ -506,7 +493,8 @@ void connectWiFi() {
       Serial.println("WiFi connected!");
       writeMessage(F("WIFI Connected!"));
       // Init and get the time
-      configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+      //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+      initTime(tz);
     }
   }
 }
@@ -616,7 +604,7 @@ bluetoothMenu:
         //if the button is still being pressed
         if (!digitalRead(SW)) {
           //ble function
-          writeMessage("ble function");
+          ble();
           delay(1000);
           goto bluetoothMenu;
         }
@@ -721,30 +709,40 @@ setECMenu:
         ESP.restart();
       }
     }
+  }
+}
 
-    /*for (int i = 10; i >= 0; i--) {
-        writeMessage("Hold for pH/EC\ncalibration. \nBLE mode begins in " + String(i));
-        if (!digitalRead(SW)) {
-          calibratePH();
-          delay(1000);
-        }
-      }
-    */
-    /*
-        bool settingsChanged = false;
+void monitorTask(void * pvParameters) {
+  for (;;) {
+    delay(10);
+    mainPumpControl();
+
+    check_pH();
+
+    check_ec();
+
+    lightControl();
+
+  }
+}
+
+void ble(){
+  bool settingsChanged = false;
         writeMessage(F("Bluetooth\nConnect app."));
         //if (buttonPressed == 0) {
-
+        bleFlag = false;
         Serial.println("beginning SerialBT");
         Serial.println(F(bleNameString));
         if (!SerialBT.begin(bleNameString))
         {
           Serial.println(F("An error occurred initializing Bluetooth"));
+          bleFlag = false;
         }
         else {
           Serial.println(F("Initialized Bluetooth"));
+          bleFlag = true;
         }
-        bleFlag = true;
+        
         changeVar.reset();
         Serial.println(F("BLE button pressed!"));
         //}
@@ -822,24 +820,8 @@ setECMenu:
         }
         if (bleFlag == false && settingsChanged) {
           //restart and use preferences to connect to wifi
-          ESP.restart();
+          //ESP.restart();
         }
-    */
-  }
-}
-
-void monitorTask(void * pvParameters) {
-  for (;;) {
-    delay(10);
-    mainPumpControl();
-
-    check_pH();
-
-    check_ec();
-
-    lightControl();
-
-  }
 }
 
 //Puts the temperature compensated ecValue into the global variable
@@ -909,9 +891,18 @@ void ecPumpControl(float reading) {
   if (reading <= (ecSetting * 0.85)) {
     Serial.println(F("Adjusting nutrients"));
     writeMessage(F("Adjusting \nnutrients"));
-    digitalWrite(nutrients, HIGH);
-    delay(5000);
-    digitalWrite(nutrients, LOW);
+    digitalWrite(part1, HIGH);
+    delay(ratio1);
+    digitalWrite(part1, LOW);
+    delay(50);
+    digitalWrite(part2, HIGH);
+    delay(ratio2);
+    digitalWrite(part2, LOW);
+    delay(50);
+    digitalWrite(part3, HIGH);
+    delay(ratio3);
+    digitalWrite(part3, LOW);
+    delay(50);
   }
 }
 
