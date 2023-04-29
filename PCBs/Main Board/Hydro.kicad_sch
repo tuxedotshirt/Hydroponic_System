@@ -137,6 +137,9 @@
     (path "/4e1cf8bc-3f95-44ce-a942-0db37a7705b2/4f0ba6c1-48a5-4817-9847-1eadadcc7492"
       (reference "#PWR024") (unit 1) (value "GND") (footprint "")
     )
+    (path "/a2c516f5-0750-4745-a051-89f705f457c4/cc0ea299-77b9-4f24-a9ed-93ba8fcabb56"
+      (reference "#PWR?") (unit 1) (value "GND") (footprint "")
+    )
     (path "/bf715d89-14fe-4c88-b7ff-a746a6add68c/ad91e68a-906a-45df-bd8f-bf81660500eb"
       (reference "D1") (unit 1) (value "1N4007") (footprint "Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal")
     )
@@ -256,6 +259,9 @@
     )
     (path "/a2c516f5-0750-4745-a051-89f705f457c4/617f9934-a73f-4247-b7ed-ace6906c7b29"
       (reference "R9") (unit 1) (value "R_Small_US") (footprint "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal")
+    )
+    (path "/a2c516f5-0750-4745-a051-89f705f457c4/bbffa1c7-00a3-4d42-b877-6c9056b36242"
+      (reference "R?") (unit 1) (value "R_Small_US") (footprint "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P7.62mm_Horizontal")
     )
     (path "/a2c516f5-0750-4745-a051-89f705f457c4/30fc2b9f-410c-4737-8c52-61539eed7423"
       (reference "U1") (unit 1) (value "19p_Header") (footprint "Hydro:19p Header")

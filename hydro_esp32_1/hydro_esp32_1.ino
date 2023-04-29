@@ -39,11 +39,8 @@
 /*TODO:
     send reset request over ble for factory settings
     Save deploymentID for DB from app
-    use ec probe for low water level detection. 0 means water is low
+    
     Add light on/off times to app
-    Add error led to pcb
-    ph and ec adjustment error - denotes chemicals are low
-    1 pin tank overflow level sensor
     Add manual time entry
 */
 
@@ -70,12 +67,9 @@
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 32 // OLED display height, in pixels
-
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-
 
 //Temperature sensor
 #define TdsSensorPin 34
@@ -112,6 +106,7 @@ float ph = 0;
 #define part3 25
 #define errorLED 13
 #define button 19
+#define waterLevel 32
 
 float ratio1 = 1500;
 float ratio2 = 2300;
@@ -121,8 +116,6 @@ float ratio3 = 1700;
 TaskHandle_t monitorCore;
 TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
-//SemaphoreHandle_t eepromSemaphore;
-SemaphoreHandle_t flashSemaphore;
 
 simpleTimer updateDB(5000); //update every 10 minutes
 WiFiClient client;
@@ -173,6 +166,14 @@ HTTPClient http;
 //Time
 String tz = "MST7MDT,M3.2.0,M11.1.0";
 
+//Error flags
+bool waterHigh = false;
+bool waterLow = false;
+int phChemCounter = 0;
+int nutrientCounter = 0;
+#define phChemCounterLimit 10
+#define nutrientCounterLimit 10
+
 void setup() {
   Wire.begin();
   Serial.begin(9600);
@@ -187,7 +188,8 @@ void setup() {
   pinMode(part2, OUTPUT);
   pinMode(part3, OUTPUT);
   pinMode(errorLED, OUTPUT);
-  
+  pinMode(waterLevel, INPUT);
+
   digitalWrite(pHUp, LOW);
   digitalWrite(pHDown, LOW);
   digitalWrite(circulation, LOW);
@@ -196,7 +198,7 @@ void setup() {
   digitalWrite(part2, LOW);
   digitalWrite(part3, LOW);
   digitalWrite(errorLED, LOW);
-  
+
   delay(50);
   phTimer.initialize();
   ecTimer.initialize();
@@ -219,7 +221,7 @@ void setup() {
 
   //Assign tasks to cores and create mutexes
   commSemaphore = xSemaphoreCreateMutex();
-  flashSemaphore = xSemaphoreCreateMutex();
+
 
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
@@ -430,7 +432,7 @@ void writeMessage(String message) {
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
-
+    Serial.println(digitalRead(waterLevel));
     //If ble button has been pressed, restart to enter settings mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -575,7 +577,7 @@ settingsMenu:
       if (!digitalRead(SW)) {
         buttonPressed = true;
       }
-      else{
+      else {
         break;
       }
     }
@@ -713,115 +715,128 @@ setECMenu:
 }
 
 void monitorTask(void * pvParameters) {
+
   for (;;) {
     delay(10);
+
     mainPumpControl();
 
+    //check water overflow
+    //if overflow detected, do not add more chemicals.
+
+    //reset phChemCounter if nothing is required.
+    //increment phChemCounter if an adjustment needs to be made
     check_pH();
 
+    //reset nutrientCounter if nothing is required.
+    //increment nutrientCounter if an adjustment needs to be made
     check_ec();
 
     lightControl();
 
+    if (waterLow || waterHigh || phChemCounter >= phChemCounterLimit || nutrientCounter >= nutrientCounterLimit) {
+      digitalWrite(errorLED, HIGH);
+    }
+    else {
+      digitalWrite(errorLED, LOW);
+    }
   }
 }
 
-void ble(){
+void ble() {
   bool settingsChanged = false;
-        writeMessage(F("Bluetooth\nConnect app."));
-        //if (buttonPressed == 0) {
+  writeMessage(F("Bluetooth\nConnect app."));
+  //if (buttonPressed == 0) {
+  bleFlag = false;
+  Serial.println("beginning SerialBT");
+  Serial.println(F(bleNameString));
+  if (!SerialBT.begin(bleNameString))
+  {
+    Serial.println(F("An error occurred initializing Bluetooth"));
+    bleFlag = false;
+  }
+  else {
+    Serial.println(F("Initialized Bluetooth"));
+    bleFlag = true;
+  }
+
+  changeVar.reset();
+  Serial.println(F("BLE button pressed!"));
+  //}
+  //else {
+  delay(10);
+  //}
+  while (bleFlag == true) {
+    delay(50);
+
+    //timer to exit bluetooth mode
+    if (changeVar.triggered()) {
+      Serial.println(F("changeVar triggered"));
+      bleFlag = false;
+    }
+
+    while (SerialBT.available()) {
+      preferences.begin("WiFiLogin", false);
+      String bleMessage = SerialBT.readString();
+      char tempArr[bleMessage.length() + 1];
+      bleMessage.toCharArray(tempArr, bleMessage.length() + 1);
+      if (bleMessage.length() >= 1) {
+        //bleFlag = false;
+      }
+      ssidArr = strtok(tempArr, ",");
+      //Serial.print("ssidArr: ");
+      //Serial.println(String(ssidArr));
+      if (String(ssidArr) != "?") {
+        preferences.putString(ssidPref, String(ssidArr));
+        //Serial.print("Saved ssid: ");
+        //Serial.println(preferences.getString(ssidPref));
         bleFlag = false;
-        Serial.println("beginning SerialBT");
-        Serial.println(F(bleNameString));
-        if (!SerialBT.begin(bleNameString))
-        {
-          Serial.println(F("An error occurred initializing Bluetooth"));
-          bleFlag = false;
-        }
-        else {
-          Serial.println(F("Initialized Bluetooth"));
-          bleFlag = true;
-        }
-        
-        changeVar.reset();
-        Serial.println(F("BLE button pressed!"));
-        //}
-        //else {
-        delay(10);
-        //}
-        while (bleFlag == true) {
-          //xSemaphoreTake( flashSemaphore, ( TickType_t ) 10 );
-          delay(50);
+        settingsChanged  = true;
+      }
+      passArr = strtok(NULL, ",");
+      if (String(passArr) != "?") {
+        preferences.putString(pwdPref, String(passArr));
+        bleFlag = false;
+        settingsChanged  = true;
+      }
+      bleNameTemp = String(strtok(NULL, ","));
+      if (bleNameTemp != "?") {
+        preferences.putString(bleNamePref, bleNameTemp);
+        Serial.print("bleName: ");
+        Serial.println(preferences.getString(bleNamePref));
+        bleFlag = false;
+        settingsChanged = true;
+      }
+      phTemp = atof(strtok(NULL, ","));
+      if (phTemp > 0.00) {
+        preferences.putFloat(pHPref, phTemp);
+        //Serial.print("Saved pHSetting: ");
+        //Serial.println(preferences.getFloat("pHSetting"));
+        phSetting = preferences.getFloat(pHPref);
+        bleFlag = false;
+        settingsChanged = true;
+      }
+      ecTemp = atoi(strtok(NULL, ","));
+      if (ecTemp > 0.00) {
+        preferences.putFloat(ecPref, ecTemp);
+        //Serial.print("Saved ecSetting: ");
+        //Serial.println(preferences.getFloat(ecPref));
+        ecSetting = preferences.getFloat(ecPref);
+        bleFlag = false;
+        settingsChanged  = true;
+      }
+      //add deploymentID to preferences
 
-          //timer to exit bluetooth mode
-          if (changeVar.triggered()) {
-            Serial.println(F("changeVar triggered"));
-            bleFlag = false;
-            xSemaphoreGive(flashSemaphore);
-          }
+      //add BLE display name to preferences
+      preferences.end();
+      //break;
 
-          while (SerialBT.available()) {
-            preferences.begin("WiFiLogin", false);
-            String bleMessage = SerialBT.readString();
-            char tempArr[bleMessage.length() + 1];
-            bleMessage.toCharArray(tempArr, bleMessage.length() + 1);
-            if (bleMessage.length() >= 1) {
-              //bleFlag = false;
-            }
-            ssidArr = strtok(tempArr, ",");
-            //Serial.print("ssidArr: ");
-            //Serial.println(String(ssidArr));
-            if (String(ssidArr) != "?") {
-              preferences.putString(ssidPref, String(ssidArr));
-              //Serial.print("Saved ssid: ");
-              //Serial.println(preferences.getString(ssidPref));
-              bleFlag = false;
-              settingsChanged  = true;
-            }
-            passArr = strtok(NULL, ",");
-            if (String(passArr) != "?") {
-              preferences.putString(pwdPref, String(passArr));
-              bleFlag = false;
-              settingsChanged  = true;
-            }
-            bleNameTemp = String(strtok(NULL, ","));
-            if (bleNameTemp != "?") {
-              preferences.putString(bleNamePref, bleNameTemp);
-              Serial.print("bleName: ");
-              Serial.println(preferences.getString(bleNamePref));
-              bleFlag = false;
-              settingsChanged = true;
-            }
-            phTemp = atof(strtok(NULL, ","));
-            if (phTemp > 0.00) {
-              preferences.putFloat(pHPref, phTemp);
-              //Serial.print("Saved pHSetting: ");
-              //Serial.println(preferences.getFloat("pHSetting"));
-              phSetting = preferences.getFloat(pHPref);
-              bleFlag = false;
-              settingsChanged = true;
-            }
-            ecTemp = atoi(strtok(NULL, ","));
-            if (ecTemp > 0.00) {
-              preferences.putFloat(ecPref, ecTemp);
-              //Serial.print("Saved ecSetting: ");
-              //Serial.println(preferences.getFloat(ecPref));
-              ecSetting = preferences.getFloat(ecPref);
-              bleFlag = false;
-              settingsChanged  = true;
-            }
-            //add deploymentID to preferences
-
-            //add BLE display name to preferences
-            preferences.end();
-            //break;
-
-          }
-        }
-        if (bleFlag == false && settingsChanged) {
-          //restart and use preferences to connect to wifi
-          //ESP.restart();
-        }
+    }
+  }
+  //if (bleFlag == false && settingsChanged) {
+  //restart and use preferences to connect to wifi
+  //ESP.restart();
+  //}
 }
 
 //Puts the temperature compensated ecValue into the global variable
@@ -889,26 +904,40 @@ bool check_pH() {
 //blocking function, do not want to take readings from sensors with pumps running
 void ecPumpControl(float reading) {
   if (reading <= (ecSetting * 0.85)) {
-    Serial.println(F("Adjusting nutrients"));
-    writeMessage(F("Adjusting \nnutrients"));
-    digitalWrite(part1, HIGH);
-    delay(ratio1);
-    digitalWrite(part1, LOW);
-    delay(50);
-    digitalWrite(part2, HIGH);
-    delay(ratio2);
-    digitalWrite(part2, LOW);
-    delay(50);
-    digitalWrite(part3, HIGH);
-    delay(ratio3);
-    digitalWrite(part3, LOW);
-    delay(50);
+    if (reading == 0) {
+      Serial.println("WATER LOW");
+      waterLow = true;
+    }
+    else {
+      nutrientCounter++;
+      waterLow = false;
+      Serial.println(F("Adjusting nutrients"));
+      writeMessage(F("Adjusting \nnutrients"));
+      digitalWrite(part1, HIGH);
+      delay(ratio1);
+      digitalWrite(part1, LOW);
+      delay(50);
+      digitalWrite(part2, HIGH);
+      delay(ratio2);
+      digitalWrite(part2, LOW);
+      delay(50);
+      digitalWrite(part3, HIGH);
+      delay(ratio3);
+      digitalWrite(part3, LOW);
+      delay(50);
+    }
+  }
+  else {
+    waterLow = false;
+    nutrientCounter = 0;
   }
 }
 
 //blocking function, do not want to take readings from sensors with pumps running
 void phPumpControl(float reading) {
-  if (reading <= (phSetting - 0.25)) {                            //test condition against pH reading
+  if (reading <= (phSetting - 0.25)) {
+    phChemCounter++;
+    //test condition against pH reading
     //Serial.println("PH LEVEL TOO LOW");
     writeMessage(F("Adjusting pH\nup"));
     phTimer.setInterval(phAdjustInterval);
@@ -917,7 +946,9 @@ void phPumpControl(float reading) {
     digitalWrite(pHUp, LOW);
     display.clearDisplay();
   }
-  else if (reading >= (phSetting +  0.25)) {                          //test condition against pH reading
+  else if (reading >= (phSetting +  0.25)) {
+    phChemCounter++;
+    //test condition against pH reading
     //Serial.println("PH LEVEL TOO HIGH");
     writeMessage(F("Adjusting pH\ndown"));
     phTimer.setInterval(phAdjustInterval);
@@ -928,6 +959,7 @@ void phPumpControl(float reading) {
   }
   else {
     phTimer.setInterval(phInterval);
+    phChemCounter = 0;
   }
 }
 
@@ -941,32 +973,6 @@ void mainPumpControl() {
   digitalWrite(circulation, LOW);
   display.clearDisplay();
 }
-
-/*
-  void mainPumpControl() {
-  if (!pumpOn) {
-    //check if it's time to turn on
-    if (mainPumpOn.triggered()) {
-      Serial.println("mainPumpOn triggered");
-      writeMessage(F("Circulation\npump on"));
-      mainPumpOff.reset();
-      digitalWrite(circulation, HIGH);
-      pumpOn = true;
-      display.clearDisplay();
-    }
-  }
-  //if the pump is on:
-  if (pumpOn) {
-    if (mainPumpOff.triggered()) {
-      Serial.println("mainPumpOff triggered");
-      mainPumpOn.reset();
-      digitalWrite(circulation, LOW);
-      pumpOn = false;
-      display.clearDisplay();
-    }
-  }
-  }
-*/
 
 //empty loop required by ESP32. Loops are handled in tasks.
 void loop() {}
