@@ -20,28 +20,16 @@
    VCC --------------- 3.3
 */
 
-/*
-   pH Up Pump -> ESP32
-   A1 ------------ 13
-   B1------------- 12
-   C1 ------------ 14
-   D1 ------------ 27
-*/
-
-/*
-  pH Down Pump -> ESP32
-  A2 ------------ 26
-  B2------------- 25
-  C2 ------------ 33
-  D2 ------------ 32
-*/
-
 /*TODO:
     send reset request over ble for factory settings
-    Save deploymentID for DB from app
-    
+    Save deploymentID for DB from app to construct the URL string
+    Add nutrient ratios to app
+    Add manual nutrient ratio
     Add light on/off times to app
     Add manual time entry
+    implement waterHigh
+    ecPref, phPref, ecZero, kvalue, p1, p2 and p3 mutex to make sure the global isn't being accessed at the same time.
+    change semaphore delay to milliseconds: xSemaphoreTake( commSemaphore, ( TickType_t ) 1000/ portTICK_PERIOD_MS ) == pdTRUE )
 */
 
 
@@ -128,8 +116,8 @@ ESP32Time rtc(0);
 
 //Lights
 bool lightState = false;
-int lightOnTime = 1234;
-int lightOffTime = 2345;
+int lightOnTime = 0700;
+int lightOffTime = 2300;
 
 String ssid_pass;
 //String adapterString;
@@ -143,14 +131,17 @@ String bleMessage;
 #define ssidPref "ssidPref"
 #define ecZero "EC"
 #define kValue "kValue"
+#define lightOn "lightOn"
+#define lightOff "lightOff"
+#define p1 "p1"
+#define p2 "p2"
+#define p3 "p3"
 
 char *ssidArr;
 char *passArr;
 char* bleNameArr;
 String bleNameString = "Hydroponic";
 String bleNameTemp = "";
-//char macArr[17];
-//char * key;
 
 #define SW 19
 
@@ -173,6 +164,8 @@ int phChemCounter = 0;
 int nutrientCounter = 0;
 #define phChemCounterLimit 10
 #define nutrientCounterLimit 10
+
+#define mainPumpTime 1000
 
 void setup() {
   Wire.begin();
@@ -384,16 +377,17 @@ void lightControl() {
   Serial.print("LightTime: ");
   Serial.println(lightTime);
   if (lightTime >= lightOffTime) {
-    if (lightState) {
+    //if the light pin is on
+    if (digitalRead(lights)) {
       //turn lights off
-      lightState = false;
+      //lightState = false;
     }
   }
-
   if (lightTime >= lightOnTime) {
-    if (lightState) {
+    //if the light pin is off
+    if (!digitalRead(lights)) {
       //turn lights off
-      lightState = false;
+      //lightState = true;
     }
   }
 }
@@ -432,6 +426,7 @@ void writeMessage(String message) {
 void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
+    lightControl();
     Serial.println(digitalRead(waterLevel));
     //If ble button has been pressed, restart to enter settings mode
     if (digitalRead(SW) == 0) {
@@ -449,7 +444,10 @@ void dataLoggingTask(void *pvParameters) {
         //Serial.println(rtc.getDateTime(true));
         //Take mutex, write url string, return mutex.
         if (commSemaphore != NULL) {
-          if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
+          //waits 10 ticks, almost instantaneous
+          //if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10) == pdTRUE ) {
+          //waits 1000 milliseconds
+          if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000/ portTICK_PERIOD_MS) == pdTRUE ) {
             Serial.println("Grabbing mutex in dataLoggingTask");
             String urlFinal = URL + "device=" + device + "&dtg=" + rtc.getTime("%d%b%y%H%M%S") + "&ph=" + ph + "&ec=" + ec + "&temp=" + temperature;
             xSemaphoreGive(commSemaphore);
@@ -543,6 +541,21 @@ bool getSettings() {
   }
   if (preferences.isKey(kValue)) {
     kVal = preferences.getFloat(kValue);
+  }
+  if (preferences.isKey(lightOn)){
+    lightOnTime = preferences.getInt(lightOn);
+  }
+  if (preferences.isKey(lightOff)){
+    lightOffTime = preferences.getInt(lightOff);
+  }
+  if(preferences.isKey(p1)){
+    ratio1 = preferences.getFloat(p1);
+  }
+  if(preferences.isKey(p2)){
+    ratio2 = preferences.getFloat(p2);
+  }
+  if(preferences.isKey(p3)){
+    ratio3 = preferences.getFloat(p3);
   }
   preferences.end();
 
@@ -732,7 +745,7 @@ void monitorTask(void * pvParameters) {
     //increment nutrientCounter if an adjustment needs to be made
     check_ec();
 
-    lightControl();
+    //lightControl();
 
     if (waterLow || waterHigh || phChemCounter >= phChemCounterLimit || nutrientCounter >= nutrientCounterLimit) {
       digitalWrite(errorLED, HIGH);
@@ -825,7 +838,7 @@ void ble() {
         bleFlag = false;
         settingsChanged  = true;
       }
-      //add deploymentID to preferences
+      //add deploymentID to preferences to construct the URL string.
 
       //add BLE display name to preferences
       preferences.end();
@@ -855,7 +868,7 @@ bool check_ec() {
 
     //access shared resources to update transmitted value, but continues autonomously if value can't be accessed
     if (commSemaphore != NULL) {
-      if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
+      if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000/ portTICK_PERIOD_MS) == pdTRUE ) {
         Serial.println(F("Grabbing mutex in check_ec"));
         ec = ecValue25;
         //temperature = temperatureReading;
@@ -883,7 +896,7 @@ bool check_pH() {
     if (pH.get_error() == Ezo_board::SUCCESS) {
       //access shared resource, but continues autonomously if db value can't be updated
       if (commSemaphore != NULL) {
-        if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 10 ) == pdTRUE ) {
+        if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000/ portTICK_PERIOD_MS) == pdTRUE ) {
           Serial.println(F("Grabbing mutex in check_pH"));
           ph = tempReading;
           xSemaphoreGive(commSemaphore);
@@ -963,12 +976,12 @@ void phPumpControl(float reading) {
   }
 }
 
-//Removed timer. Converted to blocking call to prevent sensor readings when pump is on.
+//blocking function to prevent sensor readings when pump is on.
 void mainPumpControl() {
   Serial.println("Circulation pump on");
   writeMessage(F("Circulation\npump on"));
   digitalWrite(circulation, HIGH);
-  delay(1000);
+  delay(mainPumpTime);
   Serial.println("Circulation pump off");
   digitalWrite(circulation, LOW);
   display.clearDisplay();
