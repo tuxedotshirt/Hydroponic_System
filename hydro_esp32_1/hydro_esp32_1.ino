@@ -61,7 +61,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 //Temperature sensor
 #define TdsSensorPin 34
-#define oneWireBus 4
+#define oneWireBus 26
 float temperature = 22, tdsValue = 0, kValue = 1.0;
 OneWire oneWire(oneWireBus);
 DallasTemperature sensors(&oneWire);
@@ -374,8 +374,8 @@ void calibratePH() {
 
 void lightControl() {
   int lightTime = rtc.getHour(true) * 100 + rtc.getMinute();
-  Serial.print("LightTime: ");
-  Serial.println(lightTime);
+  //Serial.print("LightTime: ");
+  //Serial.println(lightTime);
   if (lightTime >= lightOffTime) {
     //if the light pin is on
     if (digitalRead(lights)) {
@@ -427,7 +427,7 @@ void dataLoggingTask(void *pvParameters) {
   for (;;) {
     getSettings();
     lightControl();
-    Serial.println(digitalRead(waterLevel));
+    //Serial.println(digitalRead(waterLevel));
     //If ble button has been pressed, restart to enter settings mode
     if (digitalRead(SW) == 0) {
       ESP.restart();
@@ -858,20 +858,20 @@ bool check_ec() {
     writeMessage(F("Checking EC"));
     sensors.requestTemperatures();
     float temperatureReading = sensors.getTempCByIndex(0);
-    //float temperatureReading = temperature;
-    //Serial.print("temp: ");
-    //Serial.println(temperature);
+    Serial.print("temp: ");
+    Serial.println(temperatureReading);
     float analogValue = analogRead(TdsSensorPin);
     float voltage = analogValue / 4096 * 3.3;
     float ecValue = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * kVal;
     float ecValue25  =  ecValue / (1.0 + 0.02 * (temperatureReading - 25.0)); //temperature compensation
-
+    Serial.print("EC Reading: ");
+    Serial.println(ecValue25);
     //access shared resources to update transmitted value, but continues autonomously if value can't be accessed
     if (commSemaphore != NULL) {
       if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000/ portTICK_PERIOD_MS) == pdTRUE ) {
         Serial.println(F("Grabbing mutex in check_ec"));
         ec = ecValue25;
-        //temperature = temperatureReading;
+        temperature = temperatureReading;
         xSemaphoreGive(commSemaphore);
         Serial.println(F("Returned mutex in check_ec"));
       }
