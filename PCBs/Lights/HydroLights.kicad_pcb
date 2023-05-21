@@ -252,7 +252,7 @@
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp 91998672-e8cc-4763-92ac-22a679c150fa)
     )
-    (fp_text value "352268RFT 68 Ohm" (at -0.59 2.27 90) (layer "F.SilkS") hide
+    (fp_text value "352268RFT 68 Ohm" (at -0.59 2.27 90) (layer "F.SilkS")
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp 638e6f5a-8861-4033-a7f0-3160b6db06ab)
     )
@@ -351,7 +351,7 @@
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp e3c8ab8d-0763-4b80-9953-fe00ea67453e)
     )
-    (fp_text value "35221R0JT 1 Ohm" (at 0 2.27) (layer "F.SilkS") hide
+    (fp_text value "35221R0JT 1 Ohm" (at 0 2.27) (layer "F.SilkS")
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp 1cf6e01a-bfd5-46ab-8136-3f8063d35c76)
     )
@@ -462,7 +462,7 @@
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp 68ba9fbd-9fc3-4a76-b9ca-52e4c1e28c23)
     )
-    (fp_text value "352262RFT 62 Ohm" (at -0.59 2.27 90) (layer "F.Fab") hide
+    (fp_text value "352262RFT 62 Ohm" (at -0.59 2.27 90) (layer "F.Fab")
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp 92ae6c9b-3f85-45f6-802e-7ac008f7f112)
     )
@@ -493,7 +493,7 @@
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp cbc48ea6-fbfc-4ad8-bf91-9f75e08a3e44)
     )
-    (fp_text value "352262RFT 62 Ohm" (at -0.59 2.27 90) (layer "F.Fab") hide
+    (fp_text value "352262RFT 62 Ohm" (at -0.59 2.27 90) (layer "F.Fab")
       (effects (font (size 0.393701 0.393701) (thickness 0.15)))
       (tstamp 2d3deb15-96b2-48c4-99b1-ae88e6283eb2)
     )
