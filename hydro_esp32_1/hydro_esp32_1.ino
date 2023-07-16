@@ -120,7 +120,7 @@ int nutrientCounter = 0;
 #define phChemCounterLimit 10
 #define nutrientCounterLimit 10
 bool settingsChanged = false;
-#define mainPumpTime 1000
+#define mainPumpTime 10000
 
 void setup() {
   Wire.begin();
