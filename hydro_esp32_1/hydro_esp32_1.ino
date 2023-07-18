@@ -17,7 +17,7 @@
 #include "src/TDS/GravityTDS.h"
 #include "ESP.h"
 #include <OneWire.h>
-#include <simpleTimer.h>
+#include "src/SimpleTimer/simpleTimer.h"
 #include "secret.h"
 #include "WiFi.h"
 #include <HTTPClient.h>
@@ -29,7 +29,6 @@
 #include <ESP32Time.h>
 #include "pinDefinitions.h"
 #include "preferenceDefinitions.h"
-
 
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -564,8 +563,6 @@ void setEC() {
       ESP.restart();
     }
   }
-  //TODO:
-  //change this block to the check_ec algorithm.
 
   //take reading, save to preferences.
   sensors.requestTemperatures();
@@ -720,6 +717,7 @@ void calibratePH() {
   delay(5000);
 }
 
+//memory leak when navigation back to settings(). Functions don't return.
 void settings(int buttonPressed) {
 
   if (buttonPressed == 0) {
@@ -889,7 +887,7 @@ void ble() {
 
   bleFlag = false;
   Serial.println("beginning SerialBT");
-  Serial.println(F(bleNameString));
+  Serial.println(bleNameString);
   if (!SerialBT.begin(bleNameString))
   {
     Serial.println(F("An error occurred initializing Bluetooth"));
