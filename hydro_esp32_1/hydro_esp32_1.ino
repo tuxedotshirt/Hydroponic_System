@@ -63,9 +63,9 @@ float ph = 0;
 float tempSlope = 0.0;
 float tempYIntercept = 0.0;
 
-float ratio1 = 1500;
-float ratio2 = 2300;
-float ratio3 = 1700;
+float ratio1 = 5000;
+float ratio2 = 5000;
+float ratio3 = 5000;
 
 //RTOS
 TaskHandle_t monitorCore;
@@ -110,8 +110,6 @@ HTTPClient http;
 
 //Time
 String tz = "MST7MDT,M3.2.0,M11.1.0";
-
-//Arduino IDE branch test
 
 //Error flags
 bool waterHigh = false;
@@ -372,8 +370,9 @@ void monitorTask(void * pvParameters) {
 
   for (;;) {
     delay(10);
+    printDiagnostics();
     mainPumpControl();
-
+    waterHigh = digitalRead(waterLevel);
     check_pH();
     check_ec();
 
@@ -483,11 +482,19 @@ void ecPumpControl(float reading, float setting) {
       digitalWrite(part1, HIGH);
       delay(ratio1);
       digitalWrite(part1, LOW);
-      delay(50);
+
+      digitalWrite(circulation, HIGH);
+      delay(60000); //1 minute mixing time
+      digitalWrite(circulation, LOW);
+
       digitalWrite(part2, HIGH);
       delay(ratio2);
       digitalWrite(part2, LOW);
-      delay(50);
+      
+      digitalWrite(circulation, HIGH);
+      delay(60000); //1 minute mixing time
+      digitalWrite(circulation, LOW);
+      
       digitalWrite(part3, HIGH);
       delay(ratio3);
       digitalWrite(part3, LOW);
@@ -719,7 +726,7 @@ void calibratePH() {
   delay(5000);
 }
 
-//memory leak when navigation back to settings(). Functions don't return.
+//memory leak when navigation back to settings()? Functions don't return.
 void settings(int buttonPressed) {
 
   if (buttonPressed == 0) {
@@ -958,4 +965,63 @@ void ble() {
       preferences.end();
     }
   }
+}
+
+bool printDiagnostics() {
+  bool gotMutex = false;
+  String adapterString;
+  free(ssidArr); //Free allocated memory
+  free(passArr); //Free allocated memory
+
+  if (commSemaphore != NULL) {
+    Serial.println("-------------------------------------------------------------------------------");
+    if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000 / portTICK_PERIOD_MS) == pdTRUE ) {
+      preferences.begin("WiFiLogin", false);
+      gotMutex = true;
+      Serial.println(F("Grabbing mutex in printDiagnostics"));
+      if (preferences.isKey(pHPref)) { 
+        Serial.print("pH Setting: ");
+        Serial.println(preferences.getFloat(pHPref));
+      }
+      Serial.print("Last pH reading: ");
+      Serial.println(ph);
+
+      if (preferences.isKey(ecPref)) {
+        Serial.print("EC Setting: ");
+        Serial.println(preferences.getFloat(ecPref));
+      }
+      Serial.print("Last EC reading: ");
+      Serial.println(ec);
+
+      if (preferences.isKey(lightOn)) {
+        Serial.print("Light ON time: ");
+        Serial.println(preferences.getInt(lightOn));
+      }
+      if (preferences.isKey(lightOff)) {
+        Serial.print("Light OFF time: ");
+        Serial.println(preferences.getInt(lightOff));
+      }
+      if (preferences.isKey(p1)) {
+        Serial.print("Part 1 ratio time: ");
+        Serial.println(preferences.getFloat(p1));
+      }
+      if (preferences.isKey(p2)) {
+        Serial.print("Part 2 ratio time: ");
+        Serial.println(preferences.getFloat(p2));
+      }
+      if (preferences.isKey(p3)) {
+        Serial.print("Part 3 ratio time: ");
+        Serial.println(preferences.getFloat(p3));
+      }
+      preferences.end();
+      xSemaphoreGive(commSemaphore);
+      Serial.println(F("Returned mutex in printDiagnostics"));
+    }
+    else {
+      Serial.println("Could not get mutex in printDiagnostics");
+    }
+    Serial.println("-------------------------------------------------------------------------------");
+  }
+
+  return gotMutex;
 }
