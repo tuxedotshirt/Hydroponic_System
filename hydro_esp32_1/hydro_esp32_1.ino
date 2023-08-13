@@ -1,3 +1,5 @@
+
+
 /*TODO:
     send reset request over ble for factory settings
     Save deploymentID for DB from app to construct the URL string
@@ -29,6 +31,7 @@
 #include <ESP32Time.h>
 #include "pinDefinitions.h"
 #include "preferenceDefinitions.h"
+#include "defaultValues.h"
 
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -45,8 +48,8 @@ DallasTemperature sensors(&oneWire);
 //EC Probe
 float ecSetting = 0;
 float ecTemp = 0;
-#define ecInterval 5000
-#define ecAdjustInterval 5000
+//#define ecInterval 5000
+//#define ecAdjustInterval 5000
 simpleTimer ecTimer(ecInterval);
 float ec = 2000;
 float kVal = 1.0;
@@ -55,8 +58,8 @@ float calibratedTemperature = 25.0;
 //pH Probe
 float phSetting = 7;
 float phTemp = 0;
-#define phInterval 5000 //10 minutes is 600000 //Default timer
-#define phAdjustInterval 5000 //1 minute timer to use during adjustment checks
+//#define phInterval 5000 //10 minutes is 600000 //Default timer
+//#define phAdjustInterval 5000 //1 minute timer to use during adjustment checks
 simpleTimer phTimer(phInterval);
 Ezo_board pH = Ezo_board(99, "pH");  //i2c address of pH EZO board is 99
 float ph = 0;
@@ -72,7 +75,7 @@ TaskHandle_t monitorCore;
 TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
 
-simpleTimer updateDB(5000); //update every 10 minutes
+simpleTimer updateDB(600000); //update every 10 minutes
 WiFiClient client;
 BluetoothSerial SerialBT;
 Preferences preferences;
@@ -86,6 +89,7 @@ bool lightState = false;
 int lightOnTime = 0700;
 int lightOffTime = 2300;
 
+//WIFI
 String ssid_pass;
 //String adapterString;
 int adapterLength;
@@ -97,7 +101,7 @@ char* bleNameArr;
 String bleNameString = "Hydroponic";
 String bleNameTemp = "";
 
-#define SW 19
+//#define SW 19
 
 bool bleFlag = false;
 simpleTimer changeVar(90000);
@@ -105,6 +109,7 @@ simpleTimer changeVar(90000);
 void dataLoggingTask(void *pvParameters);
 void monitorTask(void * pvParameters);
 
+simpleTimer mainPumpTimer(mainPumpWait);
 //Http client for db
 HTTPClient http;
 
@@ -116,10 +121,10 @@ bool waterHigh = false;
 bool waterLow = false;
 int phChemCounter = 0;
 int nutrientCounter = 0;
-#define phChemCounterLimit 10
-#define nutrientCounterLimit 10
+//#define phChemCounterLimit 10
+//#define nutrientCounterLimit 10
 bool settingsChanged = false;
-#define mainPumpTime 10000
+//#define mainPumpTime 10000
 
 void setup() {
   Wire.begin();
@@ -151,7 +156,8 @@ void setup() {
   ecTimer.initialize();
   changeVar.initialize();
   wifiTimer.initialize();
-
+  mainPumpTimer.initialize();
+  
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));
   }
@@ -370,8 +376,10 @@ void monitorTask(void * pvParameters) {
 
   for (;;) {
     delay(10);
-    printDiagnostics();
-    mainPumpControl();
+    //printDiagnostics();
+    if(mainPumpTimer.triggered()){
+      mainPumpControl();
+    }
     waterHigh = digitalRead(waterLevel);
     check_pH();
     check_ec();

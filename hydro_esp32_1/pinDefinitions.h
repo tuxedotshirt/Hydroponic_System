@@ -8,7 +8,7 @@
 #define part2 27
 #define part3 25
 #define errorLED 13
-#define button 19
+#define SW 19
 #define waterLevel 32
 
 #define TdsSensorPin 34
