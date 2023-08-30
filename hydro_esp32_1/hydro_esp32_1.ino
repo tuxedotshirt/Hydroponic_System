@@ -86,7 +86,7 @@ ESP32Time rtc(0);
 
 //Lights
 bool lightState = false;
-int lightOnTime = 0700;
+int lightOnTime = 700;
 int lightOffTime = 2315;
 
 //WIFI
@@ -179,6 +179,12 @@ void setup() {
 
 void lightControl() {
   int lightTime = rtc.getHour(true) * 100 + rtc.getMinute();
+  Serial.print("lightTime: ");
+  Serial.println(lightTime);
+  Serial.print("lightOnTime: ");
+  Serial.println(lightOnTime);
+  Serial.print("lightOffTime");
+  Serial.println(lightOffTime);
   if (lightTime >= lightOnTime && lightTime <= lightOffTime) {
     //if the light pin is off
     if (!digitalRead(lights)) {
@@ -193,7 +199,6 @@ void lightControl() {
       digitalWrite(lights, LOW);
     }
   }
-
 }
 
 bool initTime(String timezone) {
