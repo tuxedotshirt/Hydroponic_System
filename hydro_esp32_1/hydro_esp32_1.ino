@@ -1,5 +1,5 @@
 
-
+//29Aug2023
 /*TODO:
     send reset request over ble for factory settings
     Save deploymentID for DB from app to construct the URL string
@@ -66,16 +66,16 @@ float ph = 0;
 float tempSlope = 0.0;
 float tempYIntercept = 0.0;
 
-float ratio1 = 5000;
-float ratio2 = 5000;
-float ratio3 = 5000;
+float ratio1 = 2.5 * ECPumpOnFactor;
+float ratio2 = 1.3 * ECPumpOnFactor;
+float ratio3 = 2.5 * ECPumpOnFactor;
 
 //RTOS
 TaskHandle_t monitorCore;
 TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
 
-simpleTimer updateDB(600000); //update every 10 minutes
+simpleTimer updateDB(updateDBTime); //update every 10 minutes
 WiFiClient client;
 BluetoothSerial SerialBT;
 Preferences preferences;
@@ -87,7 +87,7 @@ ESP32Time rtc(0);
 //Lights
 bool lightState = false;
 int lightOnTime = 0700;
-int lightOffTime = 2300;
+int lightOffTime = 2315;
 
 //WIFI
 String ssid_pass;
@@ -171,26 +171,29 @@ void setup() {
   getSettings();
   connectWiFi();
 
+  //primePumps();
+  
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 }
 
 void lightControl() {
   int lightTime = rtc.getHour(true) * 100 + rtc.getMinute();
-  if (lightTime >= lightOffTime) {
-    //if the light pin is on
-    if (digitalRead(lights)) {
-      //turn lights off
-      digitalWrite(lights, LOW);
-    }
-  }
-  if (lightTime >= lightOnTime) {
+  if (lightTime >= lightOnTime && lightTime <= lightOffTime) {
     //if the light pin is off
     if (!digitalRead(lights)) {
       //turn lights on
       digitalWrite(lights, HIGH);
     }
   }
+  else{
+    //if the light pin is on
+    if (digitalRead(lights)) {
+      //turn lights off
+      digitalWrite(lights, LOW);
+    }
+  }
+
 }
 
 bool initTime(String timezone) {
@@ -248,15 +251,18 @@ void dataLoggingTask(void *pvParameters) {
         if (commSemaphore != NULL) {
           if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000 / portTICK_PERIOD_MS) == pdTRUE ) {
             Serial.println("Grabbing mutex in dataLoggingTask");
-            String urlFinal = URL + "device=" + device + "&dtg=" + rtc.getTime("%d%b%y%H%M%S") + "&ph=" + ph + "&ec=" + ec + "&temp=" + temperature;
+            String urlFinal = URL + "device=" + device + "&dtg=" + rtc.getTime("%d%m%y%H%M") + "&ph=" + ph + "&ec=" + ec + "&temp=" + temperature;
             xSemaphoreGive(commSemaphore);
-
+            Serial.println(urlFinal);
             http.begin(urlFinal.c_str());
             http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
             int httpCode = http.GET();
             Serial.print("HTTP Status Code: ");
             Serial.println(httpCode);
+            if(httpCode != 200 && httpCode != 400){
+              connectWiFi();
+            }
             updateDB.reset();
             http.end();
             writeMessage(F("Updated database"));
@@ -521,26 +527,26 @@ void ecPumpControl(float reading, float setting) {
 //blocking function, do not want to take readings from sensors with pumps running
 void phPumpControl(float reading, float setting) {
   if (!waterHigh) {
-    if (reading <= (setting - 0.25)) {
+    if (reading <= (setting - 0.5)) {
       phChemCounter++;
       //test condition against pH reading
       //Serial.println("PH LEVEL TOO LOW");
       writeMessage(F("Adjusting pH\nup"));
       phTimer.setInterval(phAdjustInterval);
       digitalWrite(pHUp, HIGH);
-      delay(2500);
+      delay(pHPumpOn);
       digitalWrite(pHUp, LOW);
       display.clearDisplay();
       mainPumpControl();
     }
-    else if (reading >= (setting +  0.25)) {
+    else if (reading >= (setting +  0.5)) {
       phChemCounter++;
       //test condition against pH reading
       //Serial.println("PH LEVEL TOO HIGH");
       writeMessage(F("Adjusting pH\ndown"));
       phTimer.setInterval(phAdjustInterval);
       digitalWrite(pHDown, HIGH);
-      delay(2500);
+      delay(pHPumpOn);
       digitalWrite(pHDown, LOW);
       display.clearDisplay();
       mainPumpControl();
@@ -973,6 +979,26 @@ void ble() {
       preferences.end();
     }
   }
+}
+
+void primePumps(){
+  /*
+    digitalWrite(part1, HIGH);
+  delay(60000);
+  digitalWrite(part1, LOW);
+  delay(2000);
+
+    digitalWrite(part2, HIGH);
+  delay(60000);
+  digitalWrite(part2, LOW);
+  delay(2000);
+*/
+    digitalWrite(part3, HIGH);
+  delay(60000);
+  digitalWrite(part3, LOW);
+  delay(2000);
+
+    
 }
 
 bool printDiagnostics() {
