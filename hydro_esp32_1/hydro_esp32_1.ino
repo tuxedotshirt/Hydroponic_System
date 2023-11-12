@@ -1,5 +1,4 @@
 
-//29Aug2023
 /*TODO:
     send reset request over ble for factory settings
     Save deploymentID for DB from app to construct the URL string
@@ -58,8 +57,7 @@ float calibratedTemperature = 25.0;
 //pH Probe
 float phSetting = 7;
 float phTemp = 0;
-//#define phInterval 5000 //10 minutes is 600000 //Default timer
-//#define phAdjustInterval 5000 //1 minute timer to use during adjustment checks
+
 simpleTimer phTimer(phInterval);
 Ezo_board pH = Ezo_board(99, "pH");  //i2c address of pH EZO board is 99
 float ph = 0;
@@ -75,17 +73,16 @@ TaskHandle_t monitorCore;
 TaskHandle_t dataLogging;
 SemaphoreHandle_t commSemaphore;
 
-simpleTimer updateDB(updateDBTime); //update every 10 minutes
+simpleTimer updateDB(updateDBTime);
 WiFiClient client;
 BluetoothSerial SerialBT;
 Preferences preferences;
-simpleTimer wifiTimer(20000); //Try to connect to WiFi for 20 seconds
+simpleTimer wifiTimer(wifiConnect); //Try to connect to WiFi for 20 seconds
 const char* ntpServer = "pool.ntp.org";
 //ESP32Time rtc;
 ESP32Time rtc(0);
 
 //Lights
-bool lightState = false;
 int lightOnTime = 700;
 int lightOffTime = 2315;
 
@@ -121,10 +118,9 @@ bool waterHigh = false;
 bool waterLow = false;
 int phChemCounter = 0;
 int nutrientCounter = 0;
-//#define phChemCounterLimit 10
-//#define nutrientCounterLimit 10
 bool settingsChanged = false;
-//#define mainPumpTime 10000
+
+simpleTimer timeCheckTimer(timeCheck);
 
 void setup() {
   Wire.begin();
@@ -157,7 +153,9 @@ void setup() {
   changeVar.initialize();
   wifiTimer.initialize();
   mainPumpTimer.initialize();
-  
+  timeCheckTimer.initialize();
+
+  http.setTimeout(30000);
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("SSD1306 allocation failed"));
   }
@@ -170,30 +168,25 @@ void setup() {
   settings(digitalRead(SW));
   getSettings();
   connectWiFi();
-
-  //primePumps();
-  
+  digitalWrite(lights, HIGH);
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
 }
 
 void lightControl() {
   int lightTime = rtc.getHour(true) * 100 + rtc.getMinute();
-  Serial.print("lightTime: ");
   Serial.println(lightTime);
-  Serial.print("lightOnTime: ");
-  Serial.println(lightOnTime);
-  Serial.print("lightOffTime");
-  Serial.println(lightOffTime);
   if (lightTime >= lightOnTime && lightTime <= lightOffTime) {
     //if the light pin is off
+    //Serial.println("Turning lights on");
     if (!digitalRead(lights)) {
       //turn lights on
       digitalWrite(lights, HIGH);
     }
   }
-  else{
+  else {
     //if the light pin is on
+    //Serial.println("Turning lights off");
     if (digitalRead(lights)) {
       //turn lights off
       digitalWrite(lights, LOW);
@@ -202,19 +195,59 @@ void lightControl() {
 }
 
 bool initTime(String timezone) {
+  bool success = true;
   configTime(0, 0, ntpServer);
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
+  /////
+  Serial.print("Obtaining current time.");
+  wifiTimer.reset();
+
+  
+  if (!getLocalTime(&timeinfo)) {
+    while (!getLocalTime(&timeinfo))
+    {
+      
+      delay(1000);
+      Serial.print(".");
+      //Try for 20 seconds
+      if (wifiTimer.triggered()) {
+        success = false;
+        break;
+      }
+    }
+  }
+  if (success) {
     rtc.setTimeStruct(timeinfo);
-    //Serial.println("Obtained current time");
     setTimezone(timezone);
-    //writeMessage(rtc.getDateTime(true));
-    return true;
+    Serial.println("SUCCESS");
   }
   else {
-    //Serial.println("Could not obtain current time");
-    return false;
+    Serial.println("FAILED");
   }
+
+  return success;
+  /////
+  /*
+    bool success = false;
+    configTime(0, 0, ntpServer);
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+    rtc.setTimeStruct(timeinfo);
+    Serial.println("Obtained current time");
+
+    setTimezone(timezone);
+    Serial.println(rtc.getDateTime(true));
+    //writeMessage(rtc.getDateTime(true));
+    //return true;
+    success = true;
+    }
+    else {
+    Serial.println("Could not obtain current time");
+    //return false;
+    success = false;
+    }
+    return success;
+  */
 }
 
 void setTimezone(String timezone) {
@@ -238,7 +271,10 @@ void dataLoggingTask(void *pvParameters) {
     if (settingsChanged) {
       getSettings();
     }
-    lightControl();
+    if (timeCheckTimer.triggered()) {
+      lightControl();
+      connectWiFi();
+    }
 
     //If ble button has been pressed, restart to enter settings mode
     if (digitalRead(SW) == 0) {
@@ -249,6 +285,7 @@ void dataLoggingTask(void *pvParameters) {
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Cannot update database. WIFI not connected.");
         writeMessage(F("WIFI NOT\nCONNECTED"));
+        WiFi.disconnect();
         connectWiFi();
       }
       else {
@@ -265,10 +302,12 @@ void dataLoggingTask(void *pvParameters) {
             int httpCode = http.GET();
             Serial.print("HTTP Status Code: ");
             Serial.println(httpCode);
-            if(httpCode != 200 && httpCode != 400){
+            if (httpCode != 200 && httpCode != 400) {
               connectWiFi();
             }
-            updateDB.reset();
+            if (httpCode == 200) {
+              updateDB.reset();
+            }
             http.end();
             writeMessage(F("Updated database"));
             Serial.println("Returned mutex in dataLoggingTask");
@@ -283,10 +322,11 @@ void dataLoggingTask(void *pvParameters) {
 }
 
 void connectWiFi() {
-  if (getSettings()) {
+  //if (getSettings()) {
 
-    wifiTimer.reset();
-    if (WiFi.status() != WL_CONNECTED) {
+  wifiTimer.reset();
+  if (WiFi.status() != WL_CONNECTED) {
+    if (getSettings()) {
       WiFi.begin(ssidArr, passArr);
       writeMessage(F("Connecting WIFI"));
       while (WiFi.status() != WL_CONNECTED)
@@ -307,6 +347,9 @@ void connectWiFi() {
         initTime(tz);
       }
     }
+  }
+  else {
+    Serial.println("WiFi Connection good");
   }
 }
 
@@ -388,10 +431,11 @@ void monitorTask(void * pvParameters) {
   for (;;) {
     delay(10);
     //printDiagnostics();
-    if(mainPumpTimer.triggered()){
+    if (mainPumpTimer.triggered()) {
       mainPumpControl();
     }
     waterHigh = digitalRead(waterLevel);
+    delay(sensorReadDelay);
     check_pH();
     check_ec();
 
@@ -427,8 +471,6 @@ void check_ec() {
         ecValue25  =  ecValue / (1.0 + 0.02 * (temperatureReading - calibratedTemperature)); //temperature compensation
         Serial.print("EC Reading: ");
         Serial.println(ecValue25);
-        Serial.print("kVal: ");
-        Serial.println(kVal);
         //if the EC probe has a valid reading
         if (ecValue25 != 0.0) {
           ec = ecValue25;
@@ -455,7 +497,8 @@ void check_ec() {
 
 void check_pH() {
   if (phTimer.triggeredNoReset()) {
-    float tempSetting = 0.0;
+    
+    //float tempSetting = 0.0;
     float adjustedReading = 0.0;
     pH.send_read_cmd();
     display.clearDisplay();
@@ -472,19 +515,26 @@ void check_pH() {
         if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000 / portTICK_PERIOD_MS) == pdTRUE ) {
           Serial.println(F("Grabbing mutex in check_pH"));
           adjustedReading = (tempReading - tempYIntercept) / tempSlope;
-          ph = tempReading;
-          tempSetting = phSetting;
+          Serial.print("Adjusted Reading: ");
+          Serial.println(adjustedReading);
+          Serial.print("phSetting: ");
+          Serial.println(phSetting);
+          //ph = tempReading;
+          ph = adjustedReading;
+          //tempSetting = phSetting;
           xSemaphoreGive(commSemaphore);
           Serial.println(F("Returned mutex in check_pH"));
           phTimer.reset();
-          phPumpControl(adjustedReading, tempSetting);
+          phPumpControl(adjustedReading, phSetting);
         }
         else {
           Serial.println(F("Could not grab mutex in check_pH"));
         }
       }
+      display.clearDisplay();
     }
     else {
+      writeMessage(F("Could not \nread pH"));
       Serial.println(F("ERROR: Could not read pH"));
     }
   }
@@ -509,16 +559,17 @@ void ecPumpControl(float reading, float setting) {
       digitalWrite(part2, HIGH);
       delay(ratio2);
       digitalWrite(part2, LOW);
-      
+
       digitalWrite(circulation, HIGH);
       delay(60000); //1 minute mixing time
       digitalWrite(circulation, LOW);
-      
+
       digitalWrite(part3, HIGH);
       delay(ratio3);
       digitalWrite(part3, LOW);
       delay(50);
       mainPumpControl();
+      display.clearDisplay();
     }
     else {
       nutrientCounter = 0;
@@ -526,35 +577,50 @@ void ecPumpControl(float reading, float setting) {
   }
   else {
     Serial.println("Water is too high to add nutrients");
+    display.clearDisplay();
+    writeMessage(F("Tank Level \nHigh"));
   }
 }
 
 //blocking function, do not want to take readings from sensors with pumps running
 void phPumpControl(float reading, float setting) {
   if (!waterHigh) {
-    if (reading <= (setting - 0.5)) {
+    if (reading <= (setting - pHTolerance)) { //previously 0.5
       phChemCounter++;
       //test condition against pH reading
       //Serial.println("PH LEVEL TOO LOW");
+      Serial.println("Adjusting pH up");
       writeMessage(F("Adjusting pH\nup"));
       phTimer.setInterval(phAdjustInterval);
       digitalWrite(pHUp, HIGH);
       delay(pHPumpOn);
       digitalWrite(pHUp, LOW);
       display.clearDisplay();
-      mainPumpControl();
+      //mainPumpControl();
+
+      digitalWrite(circulation, HIGH);
+      delay(60000); //10 minute mixing time
+      digitalWrite(circulation, LOW);
+
+      display.clearDisplay();
     }
-    else if (reading >= (setting +  0.5)) {
+    else if (reading >= (setting +  pHTolerance)) { //previously 0.5
       phChemCounter++;
       //test condition against pH reading
       //Serial.println("PH LEVEL TOO HIGH");
+      Serial.println("Adjusting pH down");
       writeMessage(F("Adjusting pH\ndown"));
       phTimer.setInterval(phAdjustInterval);
       digitalWrite(pHDown, HIGH);
       delay(pHPumpOn);
       digitalWrite(pHDown, LOW);
       display.clearDisplay();
-      mainPumpControl();
+      //mainPumpControl();
+      digitalWrite(circulation, HIGH);
+      delay(60000); //10 minute mixing time
+      digitalWrite(circulation, LOW);
+
+      display.clearDisplay();
     }
     else {
       phTimer.setInterval(phInterval);
@@ -563,17 +629,20 @@ void phPumpControl(float reading, float setting) {
   }
   else {
     Serial.println("Water is too high to add pH chemicals");
+    display.clearDisplay();
+    writeMessage(F("Tank Level \nHigh"));
   }
 }
 
 //blocking function to prevent sensor readings when pump is on.
 void mainPumpControl() {
-  //Serial.println("Circulation pump on");
+  Serial.println("Circulation pump on");
   writeMessage(F("Circulation\npump on"));
   digitalWrite(circulation, HIGH);
   delay(mainPumpTime);
-  //Serial.println("Circulation pump off");
+  Serial.println("Circulation pump off");
   digitalWrite(circulation, LOW);
+  mainPumpTimer.reset();
   display.clearDisplay();
 }
 
@@ -986,26 +1055,6 @@ void ble() {
   }
 }
 
-void primePumps(){
-  /*
-    digitalWrite(part1, HIGH);
-  delay(60000);
-  digitalWrite(part1, LOW);
-  delay(2000);
-
-    digitalWrite(part2, HIGH);
-  delay(60000);
-  digitalWrite(part2, LOW);
-  delay(2000);
-*/
-    digitalWrite(part3, HIGH);
-  delay(60000);
-  digitalWrite(part3, LOW);
-  delay(2000);
-
-    
-}
-
 bool printDiagnostics() {
   bool gotMutex = false;
   String adapterString;
@@ -1018,7 +1067,7 @@ bool printDiagnostics() {
       preferences.begin("WiFiLogin", false);
       gotMutex = true;
       Serial.println(F("Grabbing mutex in printDiagnostics"));
-      if (preferences.isKey(pHPref)) { 
+      if (preferences.isKey(pHPref)) {
         Serial.print("pH Setting: ");
         Serial.println(preferences.getFloat(pHPref));
       }
