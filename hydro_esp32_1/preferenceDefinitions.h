@@ -10,5 +10,5 @@
 #define p2 "p2"
 #define p3 "p3"
 #define ecCalibrateTemp "ecTemperature"
-#define yIntercept "yIntercept"
-#define slope "slope"
+//#define yIntercept "yIntercept"
+//#define slope "slope"

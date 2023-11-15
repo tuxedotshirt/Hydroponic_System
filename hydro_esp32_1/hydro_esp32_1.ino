@@ -48,7 +48,7 @@ DallasTemperature sensors(&oneWire);
 float ecSetting = 0;
 float ecTemp = 0;
 //#define ecInterval 5000
-//#define ecAdjustInterval 5000
+
 simpleTimer ecTimer(ecInterval);
 float ec = 2000;
 float kVal = 1.0;
@@ -171,6 +171,21 @@ void setup() {
   digitalWrite(lights, HIGH);
   xTaskCreatePinnedToCore(monitorTask, "monitorTask", 10000, NULL, 1, &monitorCore, 1); //Run on core 1, core 0 is for communication.
   xTaskCreatePinnedToCore(dataLoggingTask, "dataLoggingTask", 10000, NULL, 1, &dataLogging, 0); //Run on core 0.
+
+  //recommended by Atlas Scientific
+  pH.send_read_cmd();
+  delay(1000);
+  receive_and_print_reading(pH);
+  pH.send_read_cmd();
+  delay(1000);
+  receive_and_print_reading(pH);
+  pH.send_read_cmd();
+  delay(1000);
+  receive_and_print_reading(pH);
+  pH.send_read_cmd();
+  delay(1000);
+  receive_and_print_reading(pH);
+  
 }
 
 void lightControl() {
@@ -408,12 +423,12 @@ bool getSettings() {
       if (preferences.isKey(ecCalibrateTemp)) {
         calibratedTemperature = preferences.getFloat(ecCalibrateTemp);
       }
-      if (preferences.isKey(yIntercept)) {
-        tempYIntercept = preferences.getFloat(yIntercept);
-      }
-      if (preferences.isKey(slope)) {
-        tempSlope = preferences.getFloat(slope);
-      }
+//      if (preferences.isKey(yIntercept)) {
+//        tempYIntercept = preferences.getFloat(yIntercept);
+//      }
+//      if (preferences.isKey(slope)) {
+//        tempSlope = preferences.getFloat(slope);
+//      }
       preferences.end();
       xSemaphoreGive(commSemaphore);
       Serial.println(F("Returned mutex in getSettings"));
@@ -435,8 +450,9 @@ void monitorTask(void * pvParameters) {
       mainPumpControl();
     }
     waterHigh = digitalRead(waterLevel);
-    delay(sensorReadDelay);
+    //delay(sensorReadDelay);
     check_pH();
+    //delay(sensorReadDelay);
     check_ec();
 
     if (waterLow || waterHigh || phChemCounter >= phChemCounterLimit || nutrientCounter >= nutrientCounterLimit) {
@@ -450,6 +466,7 @@ void monitorTask(void * pvParameters) {
 
 void check_ec() {
   if (ecTimer.triggeredNoReset()) {
+    delay(sensorReadDelay);
     float tempSetting = 0.0;
     writeMessage(F("Checking EC"));
     sensors.requestTemperatures();
@@ -497,14 +514,16 @@ void check_ec() {
 
 void check_pH() {
   if (phTimer.triggeredNoReset()) {
-    
+    delay(sensorReadDelay);
     //float tempSetting = 0.0;
-    float adjustedReading = 0.0;
+    //float adjustedReading = 0.0;
+
+    delay(1000);
     pH.send_read_cmd();
     display.clearDisplay();
     writeMessage(F("Checking pH"));
-    delay(1000);
-    Serial.print("raw pH reading: ");
+    delay(2000);
+    Serial.print("pH reading: ");
     receive_and_print_reading(pH);             //get the reading from the PH circuit
     Serial.println();
     float tempReading = pH.get_last_received_reading();
@@ -514,18 +533,18 @@ void check_pH() {
       if (commSemaphore != NULL) {
         if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000 / portTICK_PERIOD_MS) == pdTRUE ) {
           Serial.println(F("Grabbing mutex in check_pH"));
-          adjustedReading = (tempReading - tempYIntercept) / tempSlope;
-          Serial.print("Adjusted Reading: ");
-          Serial.println(adjustedReading);
+          //adjustedReading = (tempReading - tempYIntercept) / tempSlope;
+          //Serial.print("Adjusted Reading: ");
+          //Serial.println(adjustedReading);
           Serial.print("phSetting: ");
           Serial.println(phSetting);
-          //ph = tempReading;
-          ph = adjustedReading;
+          ph = tempReading;
+          //ph = adjustedReading;
           //tempSetting = phSetting;
           xSemaphoreGive(commSemaphore);
           Serial.println(F("Returned mutex in check_pH"));
           phTimer.reset();
-          phPumpControl(adjustedReading, phSetting);
+          phPumpControl(tempReading, phSetting);
         }
         else {
           Serial.println(F("Could not grab mutex in check_pH"));
@@ -542,7 +561,7 @@ void check_pH() {
 
 //blocking function, do not want to take readings from sensors with pumps running
 void ecPumpControl(float reading, float setting) {
-  if (!waterHigh) {
+  if (!waterHigh && nutrientCounter <= nutrientCounterLimit) {
     if (reading <= (setting * 0.85)) {
       nutrientCounter++;
       //waterLow = false;
@@ -578,20 +597,19 @@ void ecPumpControl(float reading, float setting) {
   else {
     Serial.println("Water is too high to add nutrients");
     display.clearDisplay();
-    writeMessage(F("Tank Level \nHigh"));
+    writeMessage(F("Could not adjust\nnutrients."));
   }
 }
 
 //blocking function, do not want to take readings from sensors with pumps running
 void phPumpControl(float reading, float setting) {
-  if (!waterHigh) {
-    if (reading <= (setting - pHTolerance)) { //previously 0.5
+  if (!waterHigh && phChemCounter <= phChemCounterLimit) {
+    if (reading <= (setting - pHTolerance)) {
       phChemCounter++;
-      //test condition against pH reading
-      //Serial.println("PH LEVEL TOO LOW");
+      
       Serial.println("Adjusting pH up");
       writeMessage(F("Adjusting pH\nup"));
-      phTimer.setInterval(phAdjustInterval);
+      //phTimer.setInterval(phAdjustInterval);
       digitalWrite(pHUp, HIGH);
       delay(pHPumpOn);
       digitalWrite(pHUp, LOW);
@@ -599,38 +617,37 @@ void phPumpControl(float reading, float setting) {
       //mainPumpControl();
 
       digitalWrite(circulation, HIGH);
-      delay(60000); //10 minute mixing time
+      delay(1000*60*10); //10 minute mixing time
       digitalWrite(circulation, LOW);
 
       display.clearDisplay();
     }
-    else if (reading >= (setting +  pHTolerance)) { //previously 0.5
+    else if (reading >= (setting +  pHTolerance)) {
       phChemCounter++;
-      //test condition against pH reading
-      //Serial.println("PH LEVEL TOO HIGH");
+      
       Serial.println("Adjusting pH down");
       writeMessage(F("Adjusting pH\ndown"));
-      phTimer.setInterval(phAdjustInterval);
+      //phTimer.setInterval(phAdjustInterval);
       digitalWrite(pHDown, HIGH);
       delay(pHPumpOn);
       digitalWrite(pHDown, LOW);
       display.clearDisplay();
       //mainPumpControl();
       digitalWrite(circulation, HIGH);
-      delay(60000); //10 minute mixing time
+      delay(1000*60*10); //10 minute mixing time
       digitalWrite(circulation, LOW);
 
       display.clearDisplay();
     }
     else {
-      phTimer.setInterval(phInterval);
-      phChemCounter = 0;
+      //phTimer.setInterval(phInterval);
+      //phChemCounter = 0;
     }
   }
   else {
-    Serial.println("Water is too high to add pH chemicals");
+    Serial.println("Water is too high or limit exceeded.");
     display.clearDisplay();
-    writeMessage(F("Tank Level \nHigh"));
+    writeMessage(F("Could not\nadjust pH."));
   }
 }
 
@@ -740,8 +757,90 @@ void calibrateEC() {
   ESP.restart();
 }
 
-//give user 30s to place probe in solution, 30s to rinse and place in next solution
 void calibratePH() {
+
+
+  writeMessage("pH Calibration\nRelease button");
+  delay(5000);
+
+  for (int i = 30; i >= 0; i--) {
+    writeMessage("Place probe in\n7 pH solution.\n" + String(i) + " seconds remaining.\nHold to exit.");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(2500);
+      ESP.restart();
+    }
+  }
+  //Calibrate pH = 7
+  writeMessage(F("Calibrating..."));
+  delay(1000);
+  pH.send_cmd("Cal,mid,7.00");
+  Serial.println("Cal,mid,7.00");
+  delay(2000);
+  receive_reading(pH);
+  delay(5000);
+  
+  for (int i = 10; i >= 0; i--) {
+    writeMessage("Rinse probe.\n" + String(i) + " seconds remaining.\nHold to exit.");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(2500);
+      ESP.restart();
+    }
+  }
+
+  for (int i = 30; i >= 0; i--) {
+    writeMessage("Place probe in 4 pH \nsolution.\n" + String(i) + " s remaining.\nHold to exit");
+    delay(1000);
+    if (!digitalRead(SW)) {
+      writeMessage("Exiting");
+      delay(2500);
+      ESP.restart();
+    }
+  }
+  //Calibrate pH = 4
+  writeMessage(F("Calibrating..."));
+  delay(1000);
+  pH.send_cmd("Cal,low,4.00");
+  Serial.println("Cal,low,4.00");
+  delay(2000);
+  receive_reading(pH);
+  delay(5000);
+
+  writeMessage("Rinse probe.");
+  delay(10000);
+  writeMessage("pH CALIBRATION \nCOMPLETE");
+  delay(5000);
+}
+
+void receive_reading(Ezo_board &Sensor)
+{
+  Sensor.send_read_cmd();
+  switch (Sensor.get_error())                          //switch case based on what the response code is.
+  {
+    case Ezo_board::SUCCESS:
+      //Serial.println(Sensor.get_last_received_reading());               //the command was successful, print the reading
+      Serial.println("Success");
+      writeMessage("Calibration\nSUCCESS");
+      break;
+ 
+    case Ezo_board::FAIL:
+      Serial.print("Failed ");                          //means the command has failed.
+      break;
+ 
+    case Ezo_board::NOT_READY:
+      Serial.print("Pending ");                         //the command has not yet been finished calculating.
+      break;
+ 
+    case Ezo_board::NO_DATA:
+      Serial.print("No Data ");                         //the sensor has no data to send.
+      break;
+  }
+}
+//give user 30s to place probe in solution, 30s to rinse and place in next solution
+/*void calibratePH() {
   float pH4 = 4.0;
   float pH7 = 7.0;
   float pH4Reading = 0.0;
@@ -812,7 +911,7 @@ void calibratePH() {
   delay(10000);
   writeMessage("pH CALIBRATION \nCOMPLETE");
   delay(5000);
-}
+}*/
 
 //memory leak when navigation back to settings()? Functions don't return.
 void settings(int buttonPressed) {
