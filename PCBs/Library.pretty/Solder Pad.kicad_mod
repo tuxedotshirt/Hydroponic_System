@@ -1,0 +1,18 @@
+(footprint "Solder Pad" (version 20211014) (generator pcbnew)
+  (layer "F.Cu")
+  (tedit 0)
+  (attr smd)
+  (fp_text reference "REF**" (at 0 -2.54 unlocked) (layer "F.SilkS") hide
+    (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp f02d7021-68bd-4bac-bd93-4a376f7f4d04)
+  )
+  (fp_text value "Solder Pad" (at 0 5.08 unlocked) (layer "F.Fab") hide
+    (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 1cd1eebc-d354-4753-951d-7c09da869cc1)
+  )
+  (fp_text user "${REFERENCE}" (at 0 2.5 unlocked) (layer "F.Fab") hide
+    (effects (font (size 1 1) (thickness 0.15)))
+    (tstamp 6f7b2bc0-42e6-4a69-a0bb-d14b49a43267)
+  )
+  (pad "1" smd roundrect (at 0 0) (size 10 5) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25) (tstamp c386c071-557b-452e-b5cc-c0d06fadcf25))
+)

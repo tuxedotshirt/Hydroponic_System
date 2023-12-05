@@ -304,7 +304,7 @@ void dataLoggingTask(void *pvParameters) {
         connectWiFi();
       }
       else {
-        initTime(tz);
+        //initTime(tz);
         if (commSemaphore != NULL) {
           if ( xSemaphoreTake( commSemaphore, ( TickType_t ) 1000 / portTICK_PERIOD_MS) == pdTRUE ) {
             Serial.println("Grabbing mutex in dataLoggingTask");
@@ -451,9 +451,9 @@ void monitorTask(void * pvParameters) {
     }
     waterHigh = digitalRead(waterLevel);
     //delay(sensorReadDelay);
-    check_pH();
+    //check_pH();
     //delay(sensorReadDelay);
-    check_ec();
+    //check_ec();
 
     if (waterLow || waterHigh || phChemCounter >= phChemCounterLimit || nutrientCounter >= nutrientCounterLimit) {
       digitalWrite(errorLED, HIGH);

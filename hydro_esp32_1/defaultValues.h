@@ -15,8 +15,8 @@
 
 #define updateDBTime 1000*60*15
 
-#define mainPumpTime 1000*60*5 //run time
-#define mainPumpWait 1000*60*1  //time between runs
+#define mainPumpTime 1000*60*3 //run time
+#define mainPumpWait 1000*60*12  //time between runs
 
 #define wifiConnect 1000*20 //try to connect to wifi for 20 seconds
 
