@@ -31,6 +31,7 @@
 #include "pinDefinitions.h"
 #include "preferenceDefinitions.h"
 #include "defaultValues.h"
+#include "util.h"
 
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -208,7 +209,7 @@ void lightControl() {
     }
   }
 }
-
+/*
 bool initTime(String timezone) {
   bool success = true;
   configTime(0, 0, ntpServer);
@@ -241,29 +242,8 @@ bool initTime(String timezone) {
   }
 
   return success;
-  /////
-  /*
-    bool success = false;
-    configTime(0, 0, ntpServer);
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-    rtc.setTimeStruct(timeinfo);
-    Serial.println("Obtained current time");
-
-    setTimezone(timezone);
-    Serial.println(rtc.getDateTime(true));
-    //writeMessage(rtc.getDateTime(true));
-    //return true;
-    success = true;
-    }
-    else {
-    Serial.println("Could not obtain current time");
-    //return false;
-    success = false;
-    }
-    return success;
-  */
 }
+*/
 
 void setTimezone(String timezone) {
   setenv("TZ", timezone.c_str(), 1);
