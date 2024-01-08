@@ -1,6 +1,3 @@
-//timeUtil.cpp
-//functions to manage rtc initialization
-
 bool initTime(String timezone) {
   bool success = true;
   configTime(0, 0, ntpServer);
@@ -55,4 +52,9 @@ bool initTime(String timezone) {
     }
     return success;
   */
+}
+
+void setTimezone(String timezone) {
+  setenv("TZ", timezone.c_str(), 1);
+  tzset();
 }
